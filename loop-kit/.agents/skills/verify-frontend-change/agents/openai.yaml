@@ -1,0 +1,6 @@
+interface:
+  display_name: "Verify Frontend Change"
+  short_description: "End-to-end verification for UI changes."
+  default_prompt: "Use this workflow and report evidence, not assumptions."
+policy:
+  allow_implicit_invocation: true

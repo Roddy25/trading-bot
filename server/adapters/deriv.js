@@ -110,7 +110,10 @@ module.exports = {
       if (credentials.accountId && String(credentials.accountId) !== String(account.loginid)) {
         throw failure("The authorized Deriv account does not match the account ID entered.", 403, "ACCOUNT_MISMATCH");
       }
-      authorised = { loginid: String(account.loginid || credentials.accountId || "—"), currency: account.currency || "USD" };
+      const accountMode = account.is_virtual === true || account.is_virtual === 1 || account.is_virtual === "1"
+        ? "demo"
+        : account.is_virtual === false || account.is_virtual === 0 || account.is_virtual === "0" ? "live" : null;
+      authorised = { loginid: String(account.loginid || credentials.accountId || "—"), currency: account.currency || "USD", mode: accountMode };
       return this.account();
     } catch (err) {
       closeSocket();
@@ -122,7 +125,7 @@ module.exports = {
     if (!authorised) throw failure("No Deriv account connected.", 401, "NO_SESSION");
     const data = await send({ balance: 1 });
     const b = data.balance || {};
-    return { account: { accountId: authorised.loginid, currency: b.currency || authorised.currency,
+    return { account: { accountId: authorised.loginid, mode: authorised.mode, currency: b.currency || authorised.currency,
       balance: Number(b.balance || 0), equity: Number(b.balance || 0),
       freeMargin: Number(b.balance || 0), leverage: null } };
   },

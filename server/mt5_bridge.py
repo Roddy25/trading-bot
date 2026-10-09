@@ -42,8 +42,12 @@ def account_snapshot():
     account = mt5.account_info()
     if account is None:
         raise RuntimeError(f"MT5 account unavailable: {mt5.last_error()}")
+    trade_mode = "demo" if account.trade_mode == mt5.ACCOUNT_TRADE_MODE_DEMO else (
+        "live" if account.trade_mode == mt5.ACCOUNT_TRADE_MODE_REAL else "contest"
+    )
     return {
         "accountId": str(account.login),
+        "mode": trade_mode,
         "currency": account.currency,
         "balance": account.balance,
         "equity": account.equity,

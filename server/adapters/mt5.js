@@ -42,6 +42,7 @@ function mapType(order) {
 function snapshot(data = {}) {
   return {
     accountId: String(data.accountId || data.login || "—"),
+    mode: data.mode === "demo" || data.mode === "live" ? data.mode : null,
     currency: data.currency || "USD",
     balance: Number(data.balance || 0),
     equity: Number(data.equity ?? data.balance ?? 0),

@@ -56,17 +56,21 @@ browser's PNA policy is a client-side rule the server cannot override — runnin
 
 ## 2. Safety model — read this first
 
-Two independent switches must both be thrown before a single real order can leave your machine:
+Orders are persisted in `server/data/orders.jsonl` without broker credentials. The journal survives restarts.
+Execution also requires a verified matching account mode and a positive per-order volume cap.
 
 | Switch | Default | Effect |
 |---|---|---|
-| `DRY_RUN` | `true` | While true, `/order` **validates and echoes** the order but never contacts a broker. |
-| `TRADING_MODE` | `demo` | Must be exactly `live` to arm live routing. |
+| `DRY_RUN` | `true` | While true, `/order` validates and records the request but never contacts a broker. |
+| `TRADING_MODE` | `demo` | Must match the verified broker account mode (`demo` or `live`). |
+| `ALLOW_LIVE_TRADING` | `false` | Must be `true` in addition to the other controls before live orders are enabled. |
+| `MAX_ORDER_VOLUME` | `0` | Positive per-order cap in the selected broker's volume unit; zero blocks execution. |
 
-`liveArmed = (DRY_RUN === "false") && (TRADING_MODE === "live")`. Anything else keeps you safe.
+Demo orders require `DRY_RUN=false`, a verified demo account, and a positive `MAX_ORDER_VOLUME`.
+Live orders additionally require `TRADING_MODE=live` and `ALLOW_LIVE_TRADING=true`.
 
-In addition, the **front-end** enforces its own gate: live order entry stays disabled in the
-browser until every statement in the on-page risk acknowledgement is ticked.
+The front-end also requires its risk acknowledgement before enabling order entry. The backend
+enforces the account-mode and execution gates independently.
 
 **Start in dry run, place a few orders, read the console output, and only then consider arming live.**
 
@@ -77,7 +81,7 @@ browser until every statement in the on-page risk acknowledgement is ticked.
 | Variable | Required for | Notes |
 |---|---|---|
 | `PORT` | all | Default `8787`. |
-| `ALLOWED_ORIGINS` | all | Comma-separated exact browser origins. Loopback origins are allowed by default; the backend itself binds only to `127.0.0.1`. |
+| `ALLOWED_ORIGINS` | all | Comma-separated exact browser origins. Defaults to the local frontend on port 8090; the backend binds only to `127.0.0.1`. |
 | `MT5_BRIDGE_URL` | MT5 | Base URL of your local MT5 bridge (default `http://localhost:5001`). |
 | `MT5_BRIDGE_TOKEN` | MT5 | Shared bearer token required by the included Python bridge. |
 | `EXNESS_API_BASE` | Exness | Optional custom REST endpoint implementing the project adapter's `/v1/account`, `/v1/positions`, and `/v1/orders` contract. Retail Exness API access is not universal. |
@@ -85,6 +89,8 @@ browser until every statement in the on-page risk acknowledgement is ticked.
 | `DERIV_API_URL` | Deriv | Default `wss://ws.derivws.com/websockets/v3`. |
 | `DRY_RUN` | all | `true` / `false`. |
 | `TRADING_MODE` | all | `demo` / `live`. |
+| `ALLOW_LIVE_TRADING` | live | Must be `true` for live routing; defaults to `false`. |
+| `MAX_ORDER_VOLUME` | order execution | Positive per-order cap in broker-specific units; `0` blocks execution. |
 
 ---
 
@@ -133,12 +139,13 @@ Closes the session. `{ "disconnected": true }`
 ```
 
 ### `GET /orders`
-Orders this session has handled, newest first.
+Persisted order journal, newest first. Unresolved orders are included even when older than the recent-order window.
 ```json
-{ "orders": [ { "ts": 1730000000000, "broker": "mt5", "status": "submitted", "ticket": "987654",
-                "symbol": "EURUSD", "side": "buy", "orderType": "market", "volume": 0.1,
-                "price": null, "sl": 1.08, "tp": 1.095 } ] }
+{ "orders": [ { "id": "...", "broker": "mt5", "status": "submitted", "ticket": "987654",
+                "accountId": "12345678", "order": { "symbol": "EURUSD", "side": "buy",
+                "orderType": "market", "volume": 0.1 } } ] }
 ```
+`GET /orders/{orderId}` returns one record.
 
 ### `POST /order`
 ```json
@@ -146,13 +153,18 @@ Orders this session has handled, newest first.
 ```
 `orderType` is `market` | `limit` | `stop`; a pending order requires a positive `price`.
 
-**Dry-run response** (`liveArmed === false`):
+Every order request must include an `Idempotency-Key` header. Retrying the same key and payload
+returns the stored result; reusing a key for a different payload is rejected. If the broker outcome
+is uncertain, the journal records `unknown` and blocks further orders until manual reconciliation
+through `POST /orders/{orderId}/resolve`.
+
+**Dry-run response** (`DRY_RUN=true`):
 ```json
 { "dryRun": true, "accepted": true, "ticket": "DRY-XXXXXXXX",
   "message": "Dry run — order validated but NOT sent to the broker." }
 ```
 
-**Live response** (`liveArmed === true`):
+**Execution response** (only when all server-side gates pass):
 ```json
 { "dryRun": false, "accepted": true, "ticket": "987654", "message": "MT5 bridge accepted the order" }
 ```
@@ -210,13 +222,16 @@ The adapter opens a WebSocket, authorises, then prices a proposal and buys it:
 
 Be clear-eyed about the gap between this scaffolding and a production trading system:
 
-* **No persistence.** Sessions and orders live in memory; a restart clears them.
-* **No reconciliation.** Positions are read straight from the broker; nothing detects drift.
+* **No continuous reconciliation.** Order submissions are journaled and uncertain orders require
+  manual review, but positions are not continuously reconciled against broker history.
+* **No aggregate risk controls.** The configured volume limit is per order; there is no daily loss
+  stop or total exposure cap.
 * **No background strategy loop.** The strategy engine runs in the browser. Real automated
   trading needs a server-side scheduler that survives a closed laptop.
 * **No compliance layer.** Licensing, KYC/AML, suitability checks, trade reporting and tax
   obligations are yours, and depend on where you and your clients are located.
-* **No secrets management.** `.env` is fine for local use; a deployment needs a real vault.
+* **No secrets management.** Credentials stay in process memory, but `.env` is only suitable for
+  local use; a deployment needs a real vault.
 
 ---
 

@@ -44,7 +44,11 @@ async function call(path, method = "GET", payload) {
 
 function mapAccount(data = {}) {
   const a = data.account || data;
+  const rawMode = String(a.mode || a.accountMode || a.accountType || a.account_type || "").toLowerCase();
+  const mode = ["demo", "virtual", "practice"].includes(rawMode) ? "demo"
+    : ["live", "real"].includes(rawMode) ? "live" : null;
   return { accountId: String(a.accountId || a.account || session.accountId || "—"),
+    mode,
     currency: a.currency || "USD", balance: Number(a.balance || 0),
     equity: Number(a.equity ?? a.balance ?? 0),
     freeMargin: Number(a.freeMargin ?? a.marginFree ?? 0), leverage: a.leverage || null };

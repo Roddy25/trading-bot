@@ -30,16 +30,18 @@ backend accepts localhost origins by default. Add any other exact browser origin
 
 ## Safety switches
 
-The service will not place real orders unless both of these are true:
+The service starts with order routing disabled. To enable demo execution, set `DRY_RUN=false`,
+keep `TRADING_MODE=demo`, and choose a small `MAX_ORDER_VOLUME` appropriate to the selected
+broker's unit. The sample environment file sets this limit to `0`, which blocks execution.
 
-```env
-DRY_RUN=false
-TRADING_MODE=live
-```
+For live execution, also set `TRADING_MODE=live` and `ALLOW_LIVE_TRADING=true`. The connected
+broker account must report a matching mode. Unknown account mode blocks execution. Choose
+`MAX_ORDER_VOLUME` for the broker's unit: MT5/Exness use lots, while Deriv uses stake in account
+currency. The limit applies per order only; it is not a daily or aggregate exposure control.
 
-Keep the defaults while setting up. In dry-run mode `/order` validates and records the order,
-returns a `DRY-...` ticket, and never invokes an adapter's order method. The Live page has its
-own acknowledgement gate. Never expose this credential-holding service to the public internet.
+Keep the defaults while setting up. In dry-run mode `/order` persists and records the validated
+order but never invokes an adapter's order method. Never expose this credential-holding service to
+the public internet.
 
 ## Broker adapters
 
@@ -80,8 +82,22 @@ they do not map to this fixed-duration contract flow.
 - `GET /account`
 - `GET /positions`
 - `GET /orders`
+- `GET /orders/{orderId}`
+- `POST /orders/{orderId}/resolve` (manual broker-history reconciliation)
 - `POST /order` with `{ "symbol", "side", "orderType", "volume", "price?", "sl?", "tp?" }`
 
-Sessions and the latest 200 orders are held in memory and cleared on restart. This is a local
-bridge, not a production trading platform; it does not reconcile positions, schedule strategies,
-or provide compliance controls.
+Order requests and outcomes are persisted in `data/orders.jsonl`; credentials are excluded. An
+order whose outcome is uncertain is marked `unknown` and blocks later orders for that account.
+Check the broker's account/history before resolving it:
+
+```json
+POST /orders/{orderId}/resolve
+{ "outcome": "submitted", "ticket": "broker-ticket", "note": "Confirmed in broker history" }
+```
+
+To mark it rejected, use `outcome: "rejected"`, set `brokerConfirmedAbsent: true`, and provide a
+note. The idempotency key is supplied in the `Idempotency-Key` request header. Reusing the same key
+with the same order returns the existing result instead of placing another order.
+
+This remains a local bridge, not a production trading platform. It does not reconcile positions
+continuously, schedule strategies, or enforce aggregate/daily loss controls.
