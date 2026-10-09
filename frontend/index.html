@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><script data-tmly-media-guard="1">(function(){"use strict";
+var T=window.__tmly||(window.__tmly=(function(){
+var o={},n=String(window.name||"");
+if(n.slice(0,5)==="tmly:"){n.slice(5).split("&").forEach(function(kv){
+var i=kv.indexOf("=");if(i>0){o[kv.slice(0,i)]=kv.slice(i+1)}})}
+return o})());
+if(T.presentation!=="preview"){return}
+var K="tmly:media-muted:"+String(location.pathname).replace(/[^/]*$/,"");
+var muted=false;try{muted=localStorage.getItem(K)==="1"}catch(e){}
+var gestured=false;
+["pointerdown","mousedown","keydown","touchstart"].forEach(function(t){
+document.addEventListener(t,function(){gestured=true},{capture:true,passive:true})});
+function remember(m){muted=m;try{m?localStorage.setItem(K,"1"):localStorage.removeItem(K)}catch(e){}}
+function announcePaused(el){try{el.dispatchEvent(new Event("pause"))}catch(e){}}
+function harden(el){
+el.autoplay=false;el.removeAttribute("autoplay");
+if(el.getAttribute("preload")==="auto"){el.setAttribute("preload","none")}
+if(muted){el.muted=true}
+if(!gestured&&!el.paused){try{el.pause()}catch(e){}}}
+var play=HTMLMediaElement.prototype.play;
+HTMLMediaElement.prototype.play=function(){
+if(!gestured){announcePaused(this);
+return Promise.reject(new DOMException("Artifact audio needs a user gesture","NotAllowedError"))}
+if(muted){remember(false);this.muted=false}
+return play.apply(this,arguments)};
+var acProtos=[];
+function guardAC(n){
+var N=window[n];if(!N||!N.prototype){return}
+if(acProtos.indexOf(N.prototype)<0){acProtos.push(N.prototype);
+var res=N.prototype.resume;
+if(typeof res==="function"){N.prototype.resume=function(){
+if(!gestured){return Promise.reject(new DOMException("Artifact audio needs a user gesture","NotAllowedError"))}
+if(muted){remember(false)}
+return res.apply(this,arguments)}}}
+var W=function(o){var c=arguments.length?new N(o):new N();
+if(!gestured){try{c.suspend()}catch(e){}}return c};
+W.prototype=N.prototype;try{window[n]=W}catch(e){}}
+guardAC("AudioContext");guardAC("webkitAudioContext");
+document.addEventListener("play",function(e){
+var el=e.target;if(el instanceof HTMLMediaElement&&!gestured){try{el.pause()}catch(err){}}},true);
+document.addEventListener("pause",function(e){
+if(e.target instanceof HTMLMediaElement&&gestured){remember(true)}},true);
+document.addEventListener("volumechange",function(e){
+var el=e.target;if(el instanceof HTMLMediaElement&&gestured){remember(el.muted||el.volume===0)}},true);
+function sweep(n){if(n&&n.querySelectorAll){var l=n.querySelectorAll("audio,video");
+for(var i=0;i<l.length;i++){harden(l[i])}}}
+new MutationObserver(function(rs){for(var i=0;i<rs.length;i++){var a=rs[i].addedNodes;
+for(var j=0;j<a.length;j++){var n=a[j];
+if(n instanceof HTMLMediaElement){harden(n)}else{sweep(n)}}}})
+.observe(document.documentElement,{childList:true,subtree:true});
+document.addEventListener("DOMContentLoaded",function(){sweep(document)});
+sweep(document)})();</script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tradify — Automated Trading Platform &amp; Strategy Engine</title>
+<meta name="description" content="Tradify is an automated trading platform with a broker connection flow, a strategy engine and a live paper-trading dashboard. Demo mode — simulated trades only.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="./styles.css?v=6">
+<link rel="stylesheet" href="app.css?v=5">
+<noscript><style>.reveal{opacity:1 !important;transform:none !important}</style></noscript>
+</head>
+<body data-page="home">
+
+<!-- ================= DEMO BANNER ================= -->
+<div class="demo-banner">
+  <span class="demo-banner__dot"></span>
+  <span><b>Demo mode — simulated trades.</b> Tradify is a front-end paper-trading simulation. No real broker is connected, no credentials are collected, and no real orders are placed.</span>
+</div>
+
+<!-- ================= HEADER ================= -->
+<header class="header">
+  <div class="container">
+    <nav class="nav">
+      <a class="nav__logo" href="index.html">
+        <img src="images/logo.svg" alt="Tradify"><span>Tradify</span>
+      </a>
+      <ul class="nav__menu">
+        <li class="nav__item">
+          <a class="nav__link" href="index.html#features">Solutions
+            <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 9l6 6 6-6"/></svg>
+          </a>
+          <div class="dropdown">
+            <div class="dropdown__label">Platform</div>
+            <a href="index.html#how">Demo Trading</a>
+            <a href="index.html#features">Mobile App</a>
+            <a href="index.html#features">Forex Trading Bot</a>
+            <a href="index.html#tradingview">TradingView AI Bot</a>
+            <a href="index.html#features">Tradify AI Agent</a>
+            <div class="dropdown__label">Most popular bots</div>
+            <a href="index.html#features">GOLD</a>
+            <a href="index.html#features">SILVER</a>
+            <a href="index.html#features">BTC/USD</a>
+            <a href="index.html#features">EUR/USD</a>
+          </div>
+        </li>
+        <li class="nav__item"><a class="nav__link" href="brokers.html">Brokers</a></li>
+        <li class="nav__item"><a class="nav__link" href="strategies.html">Strategies</a></li>
+        <li class="nav__item"><a class="nav__link" href="backtest.html">Backtest</a></li>
+        <li class="nav__item"><a class="nav__link" href="dashboard.html">Dashboard</a></li>
+        <li class="nav__item"><a class="nav__link" href="live.html">Live Trading</a></li>
+        <li class="nav__item"><a class="nav__link" href="pricing.html">Pricing</a></li>
+        <li class="nav__item">
+          <a class="nav__link" href="faq.html">Help
+            <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 9l6 6 6-6"/></svg>
+          </a>
+          <div class="dropdown">
+            <a href="faq.html">FAQ</a>
+            <a href="faq.html">Help Center</a>
+            <a href="contact.html">Support</a>
+            <a href="contact.html">Contact us</a>
+            <a href="about.html">About Tradify</a>
+          </div>
+        </li>
+      </ul>
+      <div class="nav__actions">
+        <span class="nav__demo" data-nav-demo><i></i>Demo mode</span>
+        <a class="btn btn--primary btn--sm" href="dashboard.html">Launch App</a>
+        <button class="nav__toggle" aria-label="Menu"><span></span></button>
+      </div>
+    </nav>
+  </div>
+</header>
+
+<div class="mobile-menu">
+  <a href="index.html#features">Solutions</a>
+  <a href="brokers.html">Brokers</a>
+  <a href="strategies.html">Strategies</a>
+  <a href="backtest.html">Backtest</a>
+  <a href="dashboard.html">Dashboard</a>
+  <a href="live.html">Live Trading</a>
+  <a href="pricing.html">Pricing</a>
+  <a href="faq.html">Help</a>
+  <a href="about.html">About Tradify</a>
+  <a href="contact.html">Contact us</a>
+  <a class="btn btn--primary" href="dashboard.html">Launch App</a>
+</div>
+
+<!-- ================= HERO ================= -->
+<section class="hero">
+  <div class="container hero__inner">
+    <div class="trust">
+      <span class="trust__stars" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="#00B67A"><path d="M12 2l3 6.5 7 .9-5 4.8 1.3 7L12 17.8 5.7 21.2 7 14.2 2 9.4l7-.9z"/></svg>
+        <svg viewBox="0 0 24 24" fill="#00B67A"><path d="M12 2l3 6.5 7 .9-5 4.8 1.3 7L12 17.8 5.7 21.2 7 14.2 2 9.4l7-.9z"/></svg>
+        <svg viewBox="0 0 24 24" fill="#00B67A"><path d="M12 2l3 6.5 7 .9-5 4.8 1.3 7L12 17.8 5.7 21.2 7 14.2 2 9.4l7-.9z"/></svg>
+        <svg viewBox="0 0 24 24" fill="#00B67A"><path d="M12 2l3 6.5 7 .9-5 4.8 1.3 7L12 17.8 5.7 21.2 7 14.2 2 9.4l7-.9z"/></svg>
+        <svg viewBox="0 0 24 24" fill="#DCDCE6"><path d="M12 2l3 6.5 7 .9-5 4.8 1.3 7L12 17.8 5.7 21.2 7 14.2 2 9.4l7-.9z"/></svg>
+      </span>
+      <span><b>4.0</b> Excellent</span>
+    </div>
+    <h1>Automate your trading.<br><span class="accent">Smart and simple.</span></h1>
+    <p class="hero__sub">Connect a broker, pick a strategy, and run it on a live paper-trading dashboard — no sign-up required.</p>
+    <div class="hero__cta">
+      <a class="btn btn--primary btn--lg" href="dashboard.html">Launch the app
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </a>
+      <a class="btn btn--ghost btn--lg" href="index.html#how">See how it works</a>
+    </div>
+
+    <div class="ticker" aria-label="Supported brokers">
+      <div class="ticker__track">
+        <img src="images/b-etoro.svg" alt="eToro">
+        <img src="images/b-icmarkets.svg" alt="IC Markets">
+        <img src="images/b-xm.svg" alt="XM">
+        <img src="images/b-exness.svg" alt="Exness">
+        <img src="images/b-alpari.svg" alt="Alpari">
+        <img src="images/b-ig.svg" alt="IG">
+        <img src="images/b-doto.svg" alt="Doto">
+        <img src="images/b-etoro.svg" alt="eToro">
+        <img src="images/b-icmarkets.svg" alt="IC Markets">
+        <img src="images/b-xm.svg" alt="XM">
+        <img src="images/b-exness.svg" alt="Exness">
+        <img src="images/b-alpari.svg" alt="Alpari">
+        <img src="images/b-ig.svg" alt="IG">
+        <img src="images/b-doto.svg" alt="Doto">
+      </div>
+    </div>
+
+    <div class="hero__visual reveal">
+      <img src="images/hero-phone.webp" alt="Tradify trading app on mobile">
+    </div>
+  </div>
+</section>
+
+<!-- ================= WHAT IS TRADIFY ================= -->
+<section class="section" id="what">
+  <div class="container">
+    <div class="center reveal">
+      <h2 class="section-title">What Is Tradify?</h2>
+      <p class="section-sub">Tradify is an AI-powered platform for automated trading. Connect a broker, choose a strategy, and run it in minutes — no coding, no sign-up, and no advanced market knowledge required. Trade anywhere, on mobile or on the web.</p>
+    </div>
+    <div class="grid grid--3" style="margin-top:52px">
+      <div class="card reveal">
+        <div class="card__icon">
+          <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 007.5.5l3-3a5 5 0 00-7-7l-1.5 1.5"/><path d="M14 11a5 5 0 00-7.5-.5l-3 3a5 5 0 007 7L12 19"/></svg>
+        </div>
+        <h3>Connect your broker</h3>
+        <p>Pick from major brokers and walk through a guided connection flow. Your account snapshot — balance and positions — loads straight into the dashboard.</p>
+      </div>
+      <div class="card reveal">
+        <div class="card__icon">
+          <svg viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>
+        </div>
+        <h3>Advanced control</h3>
+        <p>Prefer more control? Tune every parameter manually — risk per trade, position size, stop-loss, take-profit and max drawdown.</p>
+      </div>
+      <div class="card reveal">
+        <div class="card__icon">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+        </div>
+        <h3>24/5 automation</h3>
+        <p>Once launched, your strategy runs 24/5, executing your automated plan without interruptions.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= WHY CHOOSE ================= -->
+<section class="section" id="why" style="background:var(--bg-2)">
+  <div class="container">
+    <div class="center reveal">
+      <h2 class="section-title">Why Choose Automated Trading?</h2>
+    </div>
+    <div class="why-grid">
+      <div class="why-item reveal">
+        <h3>24/5 trading without constant monitoring</h3>
+        <p>Tradify runs your strategy 24/5. Smart bots track price movements, execute trades, and manage orders automatically — so you don't have to.</p>
+      </div>
+      <div class="why-item reveal">
+        <h3>Emotion-free, disciplined execution</h3>
+        <p>Tradify removes emotions from trading. No greed, no FOMO — just disciplined, rule-based automated trading.</p>
+      </div>
+      <div class="why-item reveal">
+        <h3>AI-powered strategy optimization</h3>
+        <p>Simply choose your asset and risk level, and Tradify's AI Preset will automatically set optimal base parameters. Launch a ready-to-run strategy in minutes.</p>
+      </div>
+      <div class="why-item reveal">
+        <h3>Time efficiency</h3>
+        <p>Tradify bots work like a team of professional auto traders, handling entries, exits, and risk management — while you focus on improving your strategy and growing your skills.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= KEY FEATURES ================= -->
+<section class="section" id="features">
+  <div class="container">
+    <div class="center reveal">
+      <h2 class="section-title">Key features</h2>
+    </div>
+    <div class="accordion reveal">
+      <div class="acc-item">
+        <button class="acc-head" aria-expanded="false">No-Code Strategy Setup
+          <svg class="chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div class="acc-body"><p>Tradify lets you launch automated trading strategies without writing a single line of code. Traders of any level can get started with bots using a simple setup and intuitive tools.</p></div>
+      </div>
+      <div class="acc-item">
+        <button class="acc-head" aria-expanded="false">AI Presets
+          <svg class="chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div class="acc-body"><p>AI Presets help you set up an automated trading bot in minutes by choosing a risk level.</p></div>
+      </div>
+      <div class="acc-item">
+        <button class="acc-head" aria-expanded="false">Risk-Management Tools
+          <svg class="chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div class="acc-body"><p>Integrated DCA and GRID risk-management tools allow you to define rules automatically.</p></div>
+      </div>
+      <div class="acc-item">
+        <button class="acc-head" aria-expanded="false">Built-In VPS
+          <svg class="chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div class="acc-body"><p>Built-in VPS keeps strategies running 24/5 even when your devices are offline.</p></div>
+      </div>
+      <div class="acc-item">
+        <button class="acc-head" aria-expanded="false">Seamless Broker Integration
+          <svg class="chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div class="acc-body"><p>Manage multiple broker accounts from one interface with real-time sync.</p></div>
+      </div>
+      <div class="acc-item">
+        <button class="acc-head" aria-expanded="false">Real-Time Analytics
+          <svg class="chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div class="acc-body"><p>Real-time analytics with TradingView integration on web and mobile.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= HOW IT WORKS ================= -->
+<section class="section" id="how" style="background:var(--bg-2)">
+  <div class="container">
+    <div class="center reveal">
+      <h2 class="section-title">How Tradify Works</h2>
+    </div>
+    <div class="steps">
+      <div class="step reveal">
+        <span class="step__badge">Step 1</span>
+        <h3>Connect Your Broker</h3>
+        <p>Open the app and connect a supported broker through the guided flow. No account, no sign-up — you're ready to launch a strategy in minutes.</p>
+      </div>
+      <div class="step reveal">
+        <span class="step__badge">Step 2</span>
+        <h3>Choose Your Strategy</h3>
+        <p>Pick from trend following, mean reversion, breakout, grid, DCA, scalping, momentum or arbitrage — each with its own risk profile.</p>
+      </div>
+      <div class="step reveal">
+        <span class="step__badge">Step 3</span>
+        <h3>Set Your Parameters</h3>
+        <p>Use an AI Preset that matches your risk level, or configure risk per trade, position size, stop-loss, take-profit and max drawdown manually.</p>
+      </div>
+      <div class="step step--wide reveal">
+        <span class="step__badge">Step 4</span>
+        <h3>Monitor &amp; Iterate Your Strategies</h3>
+        <p>Track performance in real time on the dashboard — active strategies, open positions, order history, P&amp;L and a live activity feed — and refine your approach over time.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= APP SHOWCASE ================= -->
+<section class="section" id="app">
+  <div class="container">
+    <div class="center reveal">
+      <h2 class="section-title">The Tradify app</h2>
+      <p class="section-sub">Three screens, one workflow: connect a broker, build a strategy, and watch it run on a live dashboard.</p>
+    </div>
+    <div class="grid grid--3" style="margin-top:52px">
+      <a class="card reveal" href="brokers.html">
+        <div class="card__icon">
+          <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 007.5.5l3-3a5 5 0 00-7-7l-1.5 1.5"/><path d="M14 11a5 5 0 00-7.5-.5l-3 3a5 5 0 007 7L12 19"/></svg>
+        </div>
+        <h3>Connect Broker</h3>
+        <p>Choose from Interactive Brokers, Schwab, Robinhood, E*TRADE, OANDA, MetaTrader, Alpaca, Coinbase and Binance, then walk through the connection flow.</p>
+      </a>
+      <a class="card reveal" href="strategies.html">
+        <div class="card__icon">
+          <svg viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg>
+        </div>
+        <h3>Strategy Engine</h3>
+        <p>Browse the strategy library, tune risk and position parameters, and toggle strategies on or off with a single switch.</p>
+      </a>
+      <a class="card reveal" href="dashboard.html">
+        <div class="card__icon">
+          <svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+        </div>
+        <h3>Live Dashboard</h3>
+        <p>Start or stop trading, watch a live-updating price chart, and track open positions, order history, P&amp;L and a streaming activity feed.</p>
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- ================= COMPARISON ================= -->
+<section class="section" id="compare" style="background:var(--bg-2)">
+  <div class="container">
+    <div class="center reveal">
+      <h2 class="section-title">Automated vs. Manual Trading</h2>
+    </div>
+    <div class="compare reveal">
+      <table>
+        <thead>
+          <tr><th>Feature</th><th>Manual Trading</th><th>Automated Trading with Tradify</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Execution Speed</td>
+            <td><span class="cell"><svg class="x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M18 6L6 18M6 6l12 12"/></svg>Slow, limited by human reaction</span></td>
+            <td><span class="cell"><svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M20 6L9 17l-5-5"/></svg>Instant, algorithmic execution</span></td>
+          </tr>
+          <tr>
+            <td>Strategy</td>
+            <td><span class="cell"><svg class="x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M18 6L6 18M6 6l12 12"/></svg>Driven by greed and FOMO</span></td>
+            <td><span class="cell"><svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M20 6L9 17l-5-5"/></svg>Guided by predefined rules</span></td>
+          </tr>
+          <tr>
+            <td>Consistency</td>
+            <td><span class="cell"><svg class="x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M18 6L6 18M6 6l12 12"/></svg>Depends on mood and focus</span></td>
+            <td><span class="cell"><svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M20 6L9 17l-5-5"/></svg>Stable and rules-based</span></td>
+          </tr>
+          <tr>
+            <td>Availability</td>
+            <td><span class="cell"><svg class="x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M18 6L6 18M6 6l12 12"/></svg>Active only when the trader is online</span></td>
+            <td><span class="cell"><svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M20 6L9 17l-5-5"/></svg>Runs 24/5 without interruptions</span></td>
+          </tr>
+          <tr>
+            <td>Setup &amp; Ease</td>
+            <td><span class="cell"><svg class="x" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M18 6L6 18M6 6l12 12"/></svg>Complex analysis and a steep learning curve</span></td>
+            <td><span class="cell"><svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M20 6L9 17l-5-5"/></svg>AI Presets with ready-made GRID/DCA setups</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ================= TRADINGVIEW ================= -->
+<section class="section" id="tradingview">
+  <div class="container">
+    <div class="center reveal">
+      <h2 class="section-title">Trade with TradingView</h2>
+      <p class="section-sub">Seamlessly connect your broker to Tradify and unlock the full potential of both platforms.</p>
+    </div>
+    <div class="tv-card reveal">
+      <div>
+        <img class="tv-logo" src="images/tradingview.svg" alt="TradingView">
+        <h3>Supercharts and trading with Tradify</h3>
+        <p>Our integration with TradingView, a top charting platform with 50M+ traders, will allow you to access both supercharged charting and advanced trading tools.</p>
+        <p>Gain unparalleled insights for informed decision-making.</p>
+      </div>
+      <div><img src="images/tv-mockup.webp" alt="TradingView integration mockup"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= FAQ ================= -->
+<section class="section" id="faq" style="background:var(--bg-2)">
+  <div class="container">
+    <div class="center reveal">
+      <h2 class="section-title">Frequently Asked Questions</h2>
+    </div>
+    <div class="accordion reveal">
+      <div class="acc-item">
+        <button class="acc-head" aria-expanded="false">Do I need trading experience to use Tradify?
+          <svg class="chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div class="acc-body"><p>Tradify is designed for traders of all levels, from beginners to pros. You can start with an AI Preset that adapts to your chosen risk profile, so you don't need to analyze every strategy parameter yourself. If you prefer more control, you can adjust all settings manually at any time.</p></div>
+      </div>
+      <div class="acc-item">
+        <button class="acc-head" aria-expanded="false">Is this real trading?
+          <svg class="chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div class="acc-body"><p>No. Tradify as presented here is a front-end demonstration running in paper-trading mode. Broker connections, balances, positions and orders are all simulated in your browser. No real broker account is contacted, no credentials are collected or transmitted, and no real orders are placed.</p></div>
+      </div>
+      <div class="acc-item">
+        <button class="acc-head" aria-expanded="false">Which brokers are supported?
+          <svg class="chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div class="acc-body"><p>The demo broker list includes Interactive Brokers, Charles Schwab / TD Ameritrade, Robinhood, E*TRADE, OANDA, MetaTrader 4/5, Alpaca, Coinbase and Binance. In this simulation, selecting any of them runs the same client-side connection flow.</p></div>
+      </div>
+      <div class="acc-item">
+        <button class="acc-head" aria-expanded="false">Can I pretest strategies before trading with real money?
+          <svg class="chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div class="acc-body"><p>Yes — that is exactly what this demo does. You get a $10,000 virtual balance, so you can launch strategies, test parameter sets, and check performance without risking real capital.</p></div>
+      </div>
+      <div class="acc-item">
+        <button class="acc-head" aria-expanded="false">Do I need to create an account?
+          <svg class="chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <div class="acc-body"><p>No. There is no sign-up or login. The app is immediately usable — connect a broker and start paper trading straight away.</p></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= CTA ================= -->
+<section class="section section--tight">
+  <div class="container">
+    <div class="cta-band reveal">
+      <h2>Join the Future of Automated Trading</h2>
+      <p>Ready to automate your trading? Connect a broker and launch your first strategy in minutes.</p>
+      <a class="btn btn--primary btn--lg" href="dashboard.html">Launch the app
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- ================= FOOTER ================= -->
+<footer class="footer">
+  <div class="container">
+    <div class="footer__grid">
+      <div class="footer__brand">
+        <img src="images/logo.svg" alt="Tradify">
+        <p>AI-powered automated trading. Connect a broker, pick a strategy, and run it in minutes — no coding required.</p>
+      </div>
+      <div class="footer__col">
+        <h4>Product</h4>
+        <a href="brokers.html">Connect Broker</a>
+        <a href="strategies.html">Strategy Engine</a>
+        <a href="backtest.html">Backtest Panel</a>
+        <a href="dashboard.html">Live Dashboard</a>
+        <a href="live.html">Live Trading</a>
+        <a href="index.html#tradingview">TradingView AI Bot</a>
+        <a href="index.html#features">Mobile App</a>
+      </div>
+      <div class="footer__col">
+        <h4>Popular bots</h4>
+        <a href="index.html#features">GOLD</a>
+        <a href="index.html#features">SILVER</a>
+        <a href="index.html#features">BTC/USD</a>
+        <a href="index.html#features">EUR/USD</a>
+        <a href="index.html#features">GBP/USD</a>
+        <a href="index.html#features">USD/JPY</a>
+      </div>
+      <div class="footer__col">
+        <h4>AI Trading</h4>
+        <a href="index.html#features">Tradify AI Agent</a>
+        <a href="index.html#features">Free AI Trading Bot</a>
+        <a href="index.html#features">AI Trading Bot for Beginners</a>
+        <a href="index.html#compare">AI Bot vs Manual Trading</a>
+        <a href="index.html#features">No-Code Trading Bot</a>
+      </div>
+      <div class="footer__col">
+        <h4>Help</h4>
+        <a href="faq.html">Help Center</a>
+        <a href="faq.html">FAQ</a>
+        <a href="contact.html">Support</a>
+        <a href="contact.html">Contact us</a>
+      </div>
+      <div class="footer__col">
+        <h4>Company</h4>
+        <a href="about.html">About Tradify</a>
+        <a href="about.html">Reviews</a>
+        <a href="pricing.html">Pricing</a>
+        <a href="partners.html">For brokers</a>
+      </div>
+    </div>
+
+    <div class="footer__legal">
+      <p>Tradify is a front-end demonstration project. It is not a broker, dealer, exchange, or investment adviser, and it does not execute real trades or hold client funds. All broker connections, balances, positions and orders shown are simulated for illustration only. Nothing on this site constitutes investment advice.</p>
+      <div class="footer__apps">
+        <img src="images/btn-googleplay.svg" alt="Get it on Google Play">
+        <img src="images/btn-appstore.svg" alt="Download on the App Store">
+      </div>
+    </div>
+
+    <div class="footer__bottom">
+      <span>© Tradify, <span data-year>2026</span></span>
+      <nav>
+        <a href="about.html">Terms of use</a>
+        <a href="about.html">Privacy policy</a>
+        <a href="about.html">Service agreement</a>
+        <a href="about.html">Refund policy</a>
+        <a href="about.html">Disclaimer Notice</a>
+      </nav>
+    </div>
+  </div>
+</footer>
+
+<script src="./script.js?v=6"></script>
+<script src="app.js?v=5"></script>
+</body>
+</html>

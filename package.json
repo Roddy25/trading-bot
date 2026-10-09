@@ -1,0 +1,16 @@
+{
+  "name": "tradify-project",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Tradify static frontend and local backend bridge",
+  "type": "commonjs",
+  "main": "server/index.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "npm --prefix server start",
+    "dev": "npm --prefix server run dev",
+    "fetch-candles": "node tools/fetch-candles.js"
+  }
+}
