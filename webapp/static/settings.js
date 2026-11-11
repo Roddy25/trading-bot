@@ -63,6 +63,7 @@
         $('f-mode').value = d.account_mode || 'demo';
         updateModeWarning();
         $('f-stake').value = d.stake || '';
+        $('f-boom-crash-stake').value = d.boom_crash_stake || '20';
         $('f-max-open').value = d.max_open_contracts || '3';
         $('f-take-profit').value = d.daily_profit_target || '0';
         $('f-loss').value = d.daily_loss_limit || '';
@@ -119,6 +120,7 @@
     };
     var optional = {
       stake: $('f-stake').value,
+      boom_crash_stake: $('f-boom-crash-stake').value,
       max_open_contracts: $('f-max-open').value,
       daily_profit_target: $('f-take-profit').value,
       daily_loss_limit: $('f-loss').value,
@@ -197,6 +199,7 @@
     var btn = $('btn-save-trading');
     var payload = {
       stake: $('f-stake').value,
+      boom_crash_stake: $('f-boom-crash-stake').value,
       max_open_contracts: $('f-max-open').value,
       daily_profit_target: $('f-take-profit').value,
       daily_loss_limit: $('f-loss').value,

@@ -173,6 +173,8 @@ class Config:
     martingale_multiplier: float = 2.0
     martingale_max_steps: int = 2
     martingale_max_stake: float = 4.0
+    # Fixed stake for Boom/Crash multiplier trades; martingale never applies.
+    boom_crash_stake: float = 20.0
     cooldown_seconds: int = 0
     # 0 disables only the daily entry-count cap.
     max_trades_per_day: int = 0
@@ -243,6 +245,7 @@ class Config:
             "martingale_multiplier": self.martingale_multiplier,
             "martingale_max_steps": self.martingale_max_steps,
             "martingale_max_stake": self.martingale_max_stake,
+            "boom_crash_stake": self.boom_crash_stake,
             "cooldown_seconds": self.cooldown_seconds,
             "max_trades_per_day": self.max_trades_per_day,
             "loss_cooldown_minutes": self.loss_cooldown_minutes,
@@ -386,6 +389,7 @@ def load_config(env_file: Optional[str] = None, require_credentials: bool = True
         martingale_multiplier=_env_float("MARTINGALE_MULTIPLIER", 2.0, 1.1, 3.0),
         martingale_max_steps=_env_int("MARTINGALE_MAX_STEPS", 2, 1, 3),
         martingale_max_stake=_env_float("MARTINGALE_MAX_STAKE", 4.0, 0.01, 1000.0),
+        boom_crash_stake=_env_float("BOOM_CRASH_STAKE", 20.0, 0.01, 100000.0),
         cooldown_seconds=_env_int("COOLDOWN_SECONDS", 0, 0, 86400),
         max_trades_per_day=_env_int("MAX_TRADES_PER_DAY", 0, 0, 1000),
         loss_cooldown_minutes=_env_int("LOSS_COOLDOWN_MINUTES", 60, 0, 10080),

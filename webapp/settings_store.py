@@ -42,7 +42,7 @@ ENV_PATH = PROJECT_ROOT / ".env"
 MANAGED_KEYS = ("DERIV_APP_ID", "DERIV_API_TOKEN")
 
 # Optional, non-secret settings the form may also write.
-OPTIONAL_KEYS = ("ACCOUNT_MODE", "STAKE", "ENABLED_INDICES", "DAILY_LOSS_LIMIT",
+OPTIONAL_KEYS = ("ACCOUNT_MODE", "STAKE", "BOOM_CRASH_STAKE", "ENABLED_INDICES", "DAILY_LOSS_LIMIT",
                  "DAILY_PROFIT_TARGET",
                  "MAX_OPEN_CONTRACTS", "MAX_TRADES_PER_DAY",
                  "MAX_CONSECUTIVE_LOSSES", "DERIV_STRATEGY_MODE")
@@ -147,6 +147,15 @@ def validate_optional(fields: Dict[str, Any]) -> Tuple[bool, str, Dict[str, str]
         if not (0.01 <= stake <= 1000):
             return False, "Stake must be between 0.01 and 1000.", {}
         cleaned["STAKE"] = f"{stake:g}"
+
+    if "boom_crash_stake" in fields and fields["boom_crash_stake"] not in (None, ""):
+        try:
+            bc_stake = float(fields["boom_crash_stake"])
+        except (TypeError, ValueError):
+            return False, "Boom/Crash stake must be a number.", {}
+        if not (0.01 <= bc_stake <= 100000):
+            return False, "Boom/Crash stake must be between 0.01 and 100000.", {}
+        cleaned["BOOM_CRASH_STAKE"] = f"{bc_stake:g}"
 
     if "daily_loss_limit" in fields and fields["daily_loss_limit"] not in (None, ""):
         try:
@@ -297,6 +306,7 @@ def current_state() -> Dict[str, Any]:
         "env_exists": ENV_PATH.exists(),
         "env_path": str(ENV_PATH),
         "stake": _num("STAKE", "1.0"),
+        "boom_crash_stake": _num("BOOM_CRASH_STAKE", "20.0"),
         "daily_loss_limit": _num("DAILY_LOSS_LIMIT", "5.0"),
         "daily_profit_target": _num("DAILY_PROFIT_TARGET", "0"),
         "max_open_contracts": _num("MAX_OPEN_CONTRACTS", "3"),

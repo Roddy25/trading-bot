@@ -30,27 +30,20 @@ def martingale_stake(
     base_stake: float,
     consecutive_losses: int,
     multiplier: float = 2.0,
-    max_steps: int = 2,
-    max_stake: Optional[float] = None,
 ) -> float:
-    """Calculate a capped stake progression from the current loss streak.
+    """Calculate an uncapped stake progression from the current loss streak.
 
-    With the defaults, the stake doubles after each settled loss (for example,
-    1 -> 2 -> 4), then stays at the configured step/amount cap. Pass zero
-    losses after a win to return to the base stake.
+    The stake doubles after every settled loss (for example, 1 -> 2 -> 4 -> 8),
+    with no step or amount cap. Pass zero losses after a win to return to the
+    base stake.
     """
     if base_stake <= 0:
         raise ValueError("base_stake must be positive")
     if multiplier < 1:
         raise ValueError("multiplier must be at least 1")
-    if max_steps < 0:
-        raise ValueError("max_steps cannot be negative")
-    cap = float("inf") if max_stake is None else max_stake
-    if cap < base_stake:
-        raise ValueError("max_stake must be at least base_stake")
 
-    steps = min(max(0, int(consecutive_losses)), int(max_steps))
-    return round(min(base_stake * multiplier ** steps, cap), 2)
+    steps = max(0, int(consecutive_losses))
+    return round(base_stake * multiplier ** steps, 2)
 
 
 @dataclass
@@ -207,11 +200,12 @@ class RiskManager:
             )
         return RiskDecision(True)
 
-    def check_stake(self, stake: float) -> RiskDecision:
+    def check_stake(self, stake: float,
+                    symbol: Optional[str] = None) -> RiskDecision:
         """
         Permit only the exact next bounded stake calculated by this manager.
         """
-        expected = self.next_stake()
+        expected = self.next_stake(symbol)
         if abs(stake - expected) > 1e-9:
             return RiskDecision(
                 False, f"stake {stake} does not match approved next stake {expected}",
@@ -219,30 +213,36 @@ class RiskManager:
             )
         return RiskDecision(True)
 
-    def next_stake(self) -> float:
-        """Return the configured stake or a capped loss-recovery stake."""
+    def next_stake(self, symbol: Optional[str] = None) -> float:
+        """Return the approved stake for the next trade.
+
+        Boom/Crash markets always use the fixed ``boom_crash_stake``
+        (martingale progression never applies there). Other markets return the
+        configured stake or the loss-recovery progression when martingale is on.
+        """
+        if symbol is not None and symbol.upper().startswith(("BOOM", "CRASH")):
+            return round(self.cfg.boom_crash_stake, 2)
         if not self.cfg.martingale_enabled:
             return self.cfg.stake
         return martingale_stake(
             base_stake=self.cfg.stake,
             consecutive_losses=self.storage.get_consecutive_losses(),
             multiplier=self.cfg.martingale_multiplier,
-            max_steps=self.cfg.martingale_max_steps,
-            max_stake=self.cfg.martingale_max_stake,
         )
 
     # ------------------------------------------------------------------
     # Aggregate
     # ------------------------------------------------------------------
     def can_trade(self, stake: Optional[float] = None,
-                  same_scan_batch: bool = False) -> RiskDecision:
+                  same_scan_batch: bool = False,
+                  symbol: Optional[str] = None) -> RiskDecision:
         """
         Run every check in a fixed order and return the first failure.
 
         Order matters for the log: the most fundamental blocker is reported
         first so the operator sees the real reason, not a downstream symptom.
         """
-        approved_stake = self.next_stake() if stake is None else stake
+        approved_stake = self.next_stake(symbol) if stake is None else stake
         checks = [
             self.check_unresolved,
             self.check_open_contracts,
@@ -262,7 +262,7 @@ class RiskManager:
             d = self.check_cooldown()
             if not d.allowed:
                 return d
-        d = self.check_stake(approved_stake)
+        d = self.check_stake(approved_stake, symbol)
         if not d.allowed:
             return d
         return RiskDecision(True, "all risk checks passed", "ok")
@@ -328,10 +328,8 @@ class RiskManager:
             "daily_loss_limit": self.cfg.daily_loss_limit,
             "daily_profit_target": self.cfg.daily_profit_target,
             "martingale_enabled": self.cfg.martingale_enabled,
-            "martingale_step": min(self.storage.get_consecutive_losses(),
-                                    self.cfg.martingale_max_steps),
+            "martingale_step": self.storage.get_consecutive_losses(),
             "next_stake": self.next_stake(),
-            "martingale_max_stake": self.cfg.martingale_max_stake,
             "open_contracts": self.storage.count_open_trades(),
             "max_open_contracts": self.cfg.max_open_contracts,
             "paused_until": paused_until.isoformat() if paused_until else None,

@@ -164,9 +164,9 @@ class TradeExecutor:
         if not signal.actionable:
             return ExecutionResult(False, "signal is not actionable")
 
-        stake = self.risk.next_stake()
+        stake = self.risk.next_stake(symbol)
         decision = self.risk.can_trade(
-            stake=stake, same_scan_batch=same_scan_batch
+            stake=stake, same_scan_batch=same_scan_batch, symbol=symbol
         )
         if not decision.allowed:
             return ExecutionResult(False, f"risk: {decision.reason}")
@@ -242,10 +242,9 @@ class TradeExecutor:
             signal_score=signal.score,
             signal_reasons=" | ".join(signal.reasons),
             signal_features=json.dumps(signal.price_action, sort_keys=True),
-            base_stake=self.cfg.stake,
-            martingale_enabled=int(self.cfg.martingale_enabled),
-            martingale_step=min(self.storage.get_consecutive_losses(),
-                                self.cfg.martingale_max_steps),
+            base_stake=stake,
+            martingale_enabled=0,
+            martingale_step=self.storage.get_consecutive_losses(),
             strategy_variant=signal.strategy_variant,
             strategy_id=signal.strategy_id,
         )
@@ -413,8 +412,7 @@ class TradeExecutor:
             signal_features=json.dumps(signal.price_action, sort_keys=True),
             base_stake=self.cfg.stake,
             martingale_enabled=int(self.cfg.martingale_enabled),
-            martingale_step=min(self.storage.get_consecutive_losses(),
-                                self.cfg.martingale_max_steps),
+            martingale_step=self.storage.get_consecutive_losses(),
             strategy_variant=signal.strategy_variant,
             strategy_id=signal.strategy_id,
         )
