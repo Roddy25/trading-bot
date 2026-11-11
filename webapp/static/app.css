@@ -112,7 +112,7 @@ body {
   top: 0;
   z-index: 40;
 }
-body:has(#demo-banner) .topbar { position: static; }
+body:has(#account-mode-banner) .topbar { position: static; }
 
 .brand { display: flex; align-items: center; gap: 12px; }
 .brand-mark {

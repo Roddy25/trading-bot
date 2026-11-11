@@ -354,6 +354,203 @@ class Strategy:
         )
 
 
+class GridSignalStrategy(Strategy):
+    """Single-contract, Deriv-compatible adaptation of a range grid.
+
+    It does not place a ladder of pending orders. Instead, it takes at most
+    one fixed-expiry Rise/Fall entry when a closed candle rejects an edge of a
+    well-defined sideways range. Existing risk controls still govern entry.
+    """
+
+    strategy_id = "deriv_grid_range_v1"
+
+    def evaluate(self, symbol: str, series: Dict[str, CandleSeries],
+                 index_value: Optional[int] = None,
+                 now: Optional[float] = None) -> Signal:
+        c1m = series["1m"].completed(now)
+        c1h = series["1h"].completed(now)
+        if (len(c1m) < max(30, self.cfg.sr_lookback)
+                or len(c1h) < self.cfg.ema_slow):
+            return Signal(symbol, index_value, "NONE", 0,
+                          ["GRID-inspired range: insufficient completed candles"],
+                          strategy_id=self.strategy_id)
+
+        lookback = min(self.cfg.sr_lookback, len(c1m))
+        window = c1m[-lookback:]
+        closes = [c.close for c in c1m]
+        highs = [c.high for c in c1m]
+        lows = [c.low for c in c1m]
+        h1_closes = [c.close for c in c1h]
+        ef, em, es = (ema(closes, n)[-1] for n in
+                      (self.cfg.ema_fast, self.cfg.ema_mid, self.cfg.ema_slow))
+        rv = rsi(closes, self.cfg.rsi_period)[-1]
+        av = atr(highs, lows, closes, 14)[-1]
+        h1_fast = ema(h1_closes, self.cfg.ema_fast)[-1]
+        h1_slow = ema(h1_closes, self.cfg.ema_slow)[-1]
+        last = c1m[-1]
+        price = last.close
+        trend_1m = classify_trend(ef, em, es, price) if None not in (ef, em, es) else "sideways"
+        trend_1h = ("up" if h1_fast is not None and h1_slow is not None and h1_fast > h1_slow
+                    else "down" if h1_fast is not None and h1_slow is not None and h1_fast < h1_slow
+                    else "sideways")
+        if rv is None or av is None or av <= 0:
+            return Signal(symbol, index_value, "NONE", 0,
+                          ["GRID-inspired range: indicators not warmed up"],
+                          price=price, candle_epoch=last.epoch,
+                          trend_1m=trend_1m, trend_1h=trend_1h,
+                          strategy_id=self.strategy_id)
+
+        floor = min(c.low for c in window)
+        ceiling = max(c.high for c in window)
+        width = ceiling - floor
+        near = max(av * 0.35, width * 0.12)
+        range_ok = (trend_1m == "sideways" and trend_1h == "sideways"
+                    and 2.0 * av <= width <= 8.0 * av)
+        at_floor = last.low <= floor + near and price > floor
+        at_ceiling = last.high >= ceiling - near and price < ceiling
+        rsi_shift = self.cfg.rsi_min - 50.0
+        call_rsi_limit = max(5.0, min(95.0, 45.0 - rsi_shift))
+        put_rsi_limit = max(5.0, min(95.0, 55.0 + rsi_shift))
+        call_rejection = (at_floor and (is_bullish_rejection(
+            last.open, last.high, last.low, last.close)
+            or is_strong_bullish_close(last.open, last.high,
+                                       last.low, last.close)) and rv <= call_rsi_limit)
+        put_rejection = (at_ceiling and (is_bearish_rejection(
+            last.open, last.high, last.low, last.close)
+            or is_strong_bearish_close(last.open, last.high,
+                                       last.low, last.close)) and rv >= put_rsi_limit)
+        direction = "CALL" if call_rejection else "PUT" if put_rejection else "NONE"
+        reasons = [
+            ("sideways range and higher timeframe confirmed" if range_ok
+             else "range filter blocked: market is not a contained sideways range"),
+            (f"price rejected range floor {floor:.5f}" if at_floor else
+             f"price rejected range ceiling {ceiling:.5f}" if at_ceiling else
+             "price is not at a range edge"),
+            f"RSI {rv:.1f}: reversal threshold {'met' if call_rejection or put_rejection else 'not met'}",
+            ("closed candle confirms edge rejection" if call_rejection or put_rejection
+             else "waiting for a closed-candle reversal at the edge"),
+        ]
+        if not range_ok:
+            direction = "NONE"
+        score = (35 + (25 if at_floor or at_ceiling else 0)
+                 + (20 if call_rejection or put_rejection else 0)
+                 + (20 if range_ok else 0))
+        if direction != "NONE" and score < self.cfg.min_signal_score:
+            reasons.append(f"BLOCKED: score {score} < range threshold {self.cfg.min_signal_score}")
+            direction = "NONE"
+        reasons.insert(0, "GRID-inspired single-entry range strategy")
+        return Signal(
+            symbol, index_value, direction, score, reasons,
+            ema_fast=ef, ema_mid=em, ema_slow=es, rsi_value=rv,
+            atr_value=av, support=floor, resistance=ceiling, price=price,
+            candle_epoch=last.epoch, trend_1m=trend_1m, trend_1h=trend_1h,
+            strategy_id=self.strategy_id,
+            price_action={"setup_key": f"range_edge_{direction.lower()}",
+                          "range_low": floor, "range_high": ceiling,
+                          "range_width_atr": round(width / av, 3),
+                          "mode": "single_entry_range"},
+        )
+
+
+class DcaPullbackStrategy(Strategy):
+    """Single-contract trend-pullback entry inspired by DCA concepts.
+
+    Deriv Rise/Fall contracts cannot average a live position, so this strategy
+    waits for a pullback and confirmation before one fixed-expiry entry. It
+    never adds contracts to an existing position.
+    """
+
+    strategy_id = "deriv_dca_pullback_v1"
+
+    def evaluate(self, symbol: str, series: Dict[str, CandleSeries],
+                 index_value: Optional[int] = None,
+                 now: Optional[float] = None) -> Signal:
+        c1m = series["1m"].completed(now)
+        c5m = series["5m"].completed(now)
+        c1h = series["1h"].completed(now)
+        if (len(c1m) < self.cfg.ema_slow
+                or len(c5m) < self.cfg.ema_slow
+                or len(c1h) < self.cfg.ema_slow):
+            return Signal(symbol, index_value, "NONE", 0,
+                          ["DCA-inspired pullback: insufficient completed candles"],
+                          strategy_id=self.strategy_id)
+
+        closes = [c.close for c in c1m]
+        highs = [c.high for c in c1m]
+        lows = [c.low for c in c1m]
+        last = c1m[-1]
+        price = last.close
+        ef, em, es = (ema(closes, n)[-1] for n in
+                      (self.cfg.ema_fast, self.cfg.ema_mid, self.cfg.ema_slow))
+        rv = rsi(closes, self.cfg.rsi_period)[-1]
+        av = atr(highs, lows, closes, 14)[-1]
+        c5 = [c.close for c in c5m]
+        c1h_close = [c.close for c in c1h]
+        tf5_fast, tf5_slow = ema(c5, self.cfg.ema_fast)[-1], ema(c5, self.cfg.ema_slow)[-1]
+        tf1h_fast, tf1h_slow = ema(c1h_close, self.cfg.ema_fast)[-1], ema(c1h_close, self.cfg.ema_slow)[-1]
+        trend_1m = classify_trend(ef, em, es, price) if None not in (ef, em, es) else "sideways"
+        trend_1h = ("up" if tf1h_fast is not None and tf1h_slow is not None and tf1h_fast > tf1h_slow
+                    else "down" if tf1h_fast is not None and tf1h_slow is not None and tf1h_fast < tf1h_slow
+                    else "sideways")
+        if rv is None or av is None or av <= 0 or ef is None or em is None:
+            return Signal(symbol, index_value, "NONE", 0,
+                          ["DCA-inspired pullback: indicators not warmed up"],
+                          price=price, candle_epoch=last.epoch,
+                          trend_1m=trend_1m, trend_1h=trend_1h,
+                          strategy_id=self.strategy_id)
+
+        trend_ok = (trend_1m == trend_1h and trend_1m in ("up", "down")
+                    and tf5_fast is not None and tf5_slow is not None
+                    and ((trend_1m == "up" and tf5_fast > tf5_slow)
+                         or (trend_1m == "down" and tf5_fast < tf5_slow)))
+        if trend_1m == "up":
+            direction = "CALL"
+            pullback = last.low <= ef + av * 0.25 and price > ef
+            candle_ok = (is_bullish_rejection(last.open, last.high, last.low, last.close)
+                         or is_strong_bullish_close(last.open, last.high, last.low, last.close))
+            rsi_low = max(0.0, 42.0 + self.cfg.rsi_min - 50.0)
+            rsi_high = min(100.0, 65.0 + self.cfg.rsi_max - 70.0)
+            rsi_ok = rsi_low <= rv <= rsi_high
+        elif trend_1m == "down":
+            direction = "PUT"
+            pullback = last.high >= ef - av * 0.25 and price < ef
+            candle_ok = (is_bearish_rejection(last.open, last.high, last.low, last.close)
+                         or is_strong_bearish_close(last.open, last.high, last.low, last.close))
+            rsi_low = max(0.0, 35.0 + self.cfg.rsi_min - 50.0)
+            rsi_high = min(100.0, 58.0 + self.cfg.rsi_max - 70.0)
+            rsi_ok = rsi_low <= rv <= rsi_high
+        else:
+            direction = "NONE"
+            pullback = candle_ok = rsi_ok = False
+        score = (35 + (25 if trend_ok else 0) + (20 if pullback else 0)
+                 + (10 if candle_ok else 0) + (10 if rsi_ok else 0))
+        reasons = [
+            "DCA-inspired single-entry trend-pullback strategy",
+            f"trend 1m={trend_1m}, 1h={trend_1h}; 5m confirmation {'agrees' if trend_ok else 'blocked'}",
+            ("closed candle pulled back to EMA and recovered" if pullback
+             else "no confirmed pullback to EMA yet"),
+            ("closed candle confirms trend continuation" if candle_ok
+             else "waiting for trend continuation candle"),
+            f"RSI {rv:.1f}: pullback band {'met' if rsi_ok else 'not met'}",
+        ]
+        if not (trend_ok and pullback and candle_ok and rsi_ok):
+            direction = "NONE"
+        if direction != "NONE" and score < self.cfg.min_signal_score:
+            reasons.append(f"BLOCKED: score {score} < pullback threshold {self.cfg.min_signal_score}")
+            direction = "NONE"
+        return Signal(
+            symbol, index_value, direction, score, reasons,
+            ema_fast=ef, ema_mid=em, ema_slow=es, rsi_value=rv,
+            atr_value=av, price=price, candle_epoch=last.epoch,
+            trend_1m=trend_1m, trend_1h=trend_1h,
+            strategy_id=self.strategy_id,
+            price_action={"setup_key": f"trend_pullback_{direction.lower()}",
+                          "mode": "single_entry_trend_pullback",
+                          "pullback_to_ema_fast": bool(pullback),
+                          "trend_confirmed": bool(trend_ok)},
+        )
+
+
 class BoomCrashStrategy:
     """Fade a completed spike toward the index's usual between-spike drift.
 
@@ -435,7 +632,11 @@ class BoomCrashStrategy:
 
 
 def strategy_for_market(symbol: str, cfg: Config):
-    """Route Boom/Crash indices to their dedicated spike-fade strategy."""
+    """Select the configured Deriv signal model, retaining Boom/Crash routing."""
     if symbol.upper().startswith(("BOOM", "CRASH")):
         return BoomCrashStrategy(cfg)
+    if cfg.deriv_strategy_mode == "grid":
+        return GridSignalStrategy(cfg)
+    if cfg.deriv_strategy_mode == "dca":
+        return DcaPullbackStrategy(cfg)
     return Strategy(cfg)

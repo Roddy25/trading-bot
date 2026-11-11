@@ -4,8 +4,8 @@ settings_store.py — validate and persist credentials from the browser.
 What this module is allowed to do
 ---------------------------------
 * Validate an App ID and a token *format*.
-* Optionally ask Deriv whether the token works, and whether the account it
-  belongs to is demo. A real-money account is refused.
+* Optionally ask Deriv whether the token works and has an account matching the
+  explicitly selected account mode.
 * Write credentials and selected trading settings into ``.env`` atomically,
   preserving every other key.
 
@@ -13,9 +13,8 @@ What it must never do
 ---------------------
 * Return the token, log the token, or put it in an exception message.
   ``scrub()`` is applied to every string that leaves this module.
-* Weaken the demo-only guard. The guard lives in ``DerivClient.connect`` and
-  is untouched; this module only *pre-checks* so the user gets a clear error
-  in the browser instead of a failed Start.
+* Select a fallback account type. ``ACCOUNT_MODE`` is explicit and defaults to
+  demo; the trading client independently enforces it at connection time.
 
 Atomic write
 ------------
@@ -43,10 +42,10 @@ ENV_PATH = PROJECT_ROOT / ".env"
 MANAGED_KEYS = ("DERIV_APP_ID", "DERIV_API_TOKEN")
 
 # Optional, non-secret settings the form may also write.
-OPTIONAL_KEYS = ("STAKE", "ENABLED_INDICES", "DAILY_LOSS_LIMIT",
+OPTIONAL_KEYS = ("ACCOUNT_MODE", "STAKE", "ENABLED_INDICES", "DAILY_LOSS_LIMIT",
                  "DAILY_PROFIT_TARGET",
                  "MAX_OPEN_CONTRACTS", "MAX_TRADES_PER_DAY",
-                 "MAX_CONSECUTIVE_LOSSES")
+                 "MAX_CONSECUTIVE_LOSSES", "DERIV_STRATEGY_MODE")
 
 # Substrings that mark a value as an obvious placeholder rather than a token.
 _PLACEHOLDER_MARKERS = (
@@ -128,6 +127,18 @@ def validate_optional(fields: Dict[str, Any]) -> Tuple[bool, str, Dict[str, str]
     """Validate the optional numeric settings. Returns (ok, error, cleaned)."""
     cleaned: Dict[str, str] = {}
 
+    if "strategy_mode" in fields and fields["strategy_mode"] not in (None, ""):
+        mode = str(fields["strategy_mode"]).strip().lower()
+        if mode not in ("trend", "grid", "dca"):
+            return False, "Strategy mode must be trend, grid or dca.", {}
+        cleaned["DERIV_STRATEGY_MODE"] = mode
+
+    if "account_mode" in fields and fields["account_mode"] not in (None, ""):
+        mode = str(fields["account_mode"]).strip().lower()
+        if mode not in ("demo", "real"):
+            return False, "Account mode must be demo or real.", {}
+        cleaned["ACCOUNT_MODE"] = mode
+
     if "stake" in fields and fields["stake"] not in (None, ""):
         try:
             stake = float(fields["stake"])
@@ -178,8 +189,8 @@ def validate_optional(fields: Dict[str, Any]) -> Tuple[bool, str, Dict[str, str]
             n = int(fields["max_consecutive_losses"])
         except (TypeError, ValueError):
             return False, "Max consecutive losses must be a whole number.", {}
-        if not (1 <= n <= 50):
-            return False, "Max consecutive losses must be between 1 and 50.", {}
+        if not (0 <= n <= 50):
+            return False, "Max consecutive losses must be between 0 and 50 (0 disables the stop).", {}
         cleaned["MAX_CONSECUTIVE_LOSSES"] = str(n)
 
     if "enabled_indices" in fields and fields["enabled_indices"] not in (None, ""):
@@ -200,10 +211,10 @@ def validate_optional(fields: Dict[str, Any]) -> Tuple[bool, str, Dict[str, str]
 # ---------------------------------------------------------------------------
 # Live check against Deriv
 # ---------------------------------------------------------------------------
-def check_with_deriv(app_id: str, token: str,
+def check_with_deriv(app_id: str, token: str, account_mode: str = "demo",
                      timeout: int = 20) -> Dict[str, Any]:
     """
-    Ask Deriv whether these credentials work, and whether the account is demo.
+    Ask Deriv whether credentials work and the selected account type exists.
 
     Returns a dict with ``ok``, ``demo``, ``accounts`` (types only) and
     ``error``. The token is never included in any returned string.
@@ -229,14 +240,17 @@ def check_with_deriv(app_id: str, token: str,
                 "error": scrub(f"Could not reach Deriv: {exc}", token)}
 
     types = [str(a.get("account_type", "")).lower() for a in accounts]
-    demo_accounts = [a for a in accounts
-                     if str(a.get("account_type", "")).lower() == "demo"]
+    matching = [a for a in accounts
+                if str(a.get("account_type", "")).lower() == account_mode]
     return {
         "ok": True,
-        "demo": bool(demo_accounts),
+        "demo": bool([a for a in accounts
+                      if str(a.get("account_type", "")).lower() == "demo"]),
+        "account_mode": account_mode,
+        "mode_available": bool(matching),
         "accounts": sorted(set(types)),
         "account_count": len(accounts),
-        "demo_count": len(demo_accounts),
+        "matching_count": len(matching),
         "error": None,
     }
 
@@ -275,6 +289,7 @@ def current_state() -> Dict[str, Any]:
 
     return {
         "configured": bool(app_id and token),
+        "account_mode": (os.getenv("ACCOUNT_MODE") or "demo").strip().lower(),
         "app_id_present": bool(app_id),
         "token_present": bool(token),
         "app_id": app_id or None,          # App ID is not a secret
@@ -287,6 +302,7 @@ def current_state() -> Dict[str, Any]:
         "max_open_contracts": _num("MAX_OPEN_CONTRACTS", "3"),
         "max_trades_per_day": _num("MAX_TRADES_PER_DAY", "0"),
         "max_consecutive_losses": _num("MAX_CONSECUTIVE_LOSSES", "3"),
+        "strategy_mode": _num("DERIV_STRATEGY_MODE", "trend"),
         "enabled_indices": _num("ENABLED_INDICES", "0,10,25,50,75,100,150,250"),
     }
 

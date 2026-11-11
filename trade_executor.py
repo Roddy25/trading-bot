@@ -48,7 +48,11 @@ class ExecutionResult:
 
 
 class TradeExecutor:
-    BOOM_CRASH_MULTIPLIER = 2
+    # Deriv only accepts specific multiplier values per index (e.g. CRASH300N
+    # accepts 20–100, CRASH900 accepts 100–400). This is only a fallback: the
+    # allowed values are discovered from contracts_for, or parsed from the
+    # broker's validation error if contracts_for does not expose them.
+    BOOM_CRASH_MULTIPLIER_FALLBACK = 20
     MULTIPLIER_MAX_HOLD_SECONDS = 300
 
     def __init__(self, client: DerivClient, cfg: Config,
@@ -174,16 +178,35 @@ class TradeExecutor:
                        f"available: {sorted(types)[:8]}"
             )
 
+        allowed = self._allowed_multipliers(symbol, expected_contract)
+        multiplier = min(allowed) if allowed else (
+            self.BOOM_CRASH_MULTIPLIER_FALLBACK)
         try:
             prop = self.client.proposal(
                 symbol=symbol, contract_type=expected_contract,
                 stake=stake, duration=0, duration_unit="s",
-                multiplier=self.BOOM_CRASH_MULTIPLIER,
+                multiplier=multiplier,
             )
         except (ProposalRejected, RateLimited, DerivError) as exc:
-            log.warning("Boom/Crash multiplier proposal failed for %s: %s",
-                        symbol, exc)
-            return ExecutionResult(False, f"multiplier proposal failed: {exc}")
+            retries = self._on_multiplier_validation_error(exc)
+            if retries is None:
+                log.warning("Boom/Crash multiplier proposal failed for %s: %s",
+                            symbol, exc)
+                return ExecutionResult(
+                    False, f"multiplier proposal failed: {exc}")
+            # Retry once with the smallest multiplier the broker accepts.
+            try:
+                prop = self.client.proposal(
+                    symbol=symbol, contract_type=expected_contract,
+                    stake=stake, duration=0, duration_unit="s",
+                    multiplier=retries,
+                )
+            except (ProposalRejected, RateLimited, DerivError) as exc2:
+                log.warning("Boom/Crash multiplier proposal failed for %s: %s",
+                            symbol, exc2)
+                return ExecutionResult(
+                    False, f"multiplier proposal failed: {exc2}")
+            multiplier = retries
 
         if not prop.get("id") or prop.get("ask_price") is None:
             return ExecutionResult(False, "invalid multiplier proposal", proposal=prop)
@@ -231,10 +254,57 @@ class TradeExecutor:
         self.risk.record_entry(buy_price)
         log.info("Opened %s %s multiplier x%d stake=%.2f; auto-close at "
                  "+/-50%% stake or 300s", symbol, expected_contract,
-                 self.BOOM_CRASH_MULTIPLIER, buy_price)
+                 multiplier, buy_price)
         return ExecutionResult(True, "multiplier purchased",
                                contract_id=int(contract_id), receipt=receipt,
                                proposal=prop)
+
+    # ------------------------------------------------------------------
+    def _allowed_multipliers(self, symbol: str,
+                             contract_type: str) -> list:
+        """Multipliers the broker accepts for this symbol and contract type."""
+        try:
+            available = self.client.contracts_for(symbol)
+        except Exception as exc:
+            log.warning("contracts_for(%s) failed while checking "
+                        "multipliers: %s", symbol, exc)
+            return []
+        for entry in available:
+            if entry.get("contract_type") != contract_type:
+                continue
+            raw = (entry.get("multiplier_range")
+                   or entry.get("multiplier") or [])
+            try:
+                values = sorted({float(v) for v in raw})
+            except (TypeError, ValueError):
+                return []
+            return values
+        return []
+
+    @staticmethod
+    def _on_multiplier_validation_error(exc: Exception) -> Optional[int]:
+        """Parse an accepted multiplier from bounds validation, if present.
+
+        Deriv rejects out-of-range multipliers with a message such as
+        'Multiplier is not in acceptable range. Accepts 20,40,60,80,100.'
+        Returns the smallest accepted multiplier, or None when the error
+        is not a multiplier-range rejection.
+        """
+        text = str(exc)
+        marker = "Accepts"
+        if "multiplier" not in text.lower() or marker not in text:
+            return None
+        tail = text.split(marker, 1)[1]
+        values = []
+        for token in tail.replace(":", ",").split(","):
+            token = token.strip().strip(". ")
+            try:
+                values.append(float(token))
+            except ValueError:
+                break
+        if not values:
+            return None
+        return int(min(values))
 
     def _execute_rise_fall(self, signal: Signal, symbol: str,
                            same_scan_batch: bool = False) -> ExecutionResult:

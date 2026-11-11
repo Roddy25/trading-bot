@@ -11,7 +11,7 @@ The web layer only:
 
 Because the panel is an observer plus a supervisor, every safety property of
 the CLI bot still holds here: the same RiskManager gates every purchase, the
-same demo-only guard runs at connect time, and there is no code path in this
+same account-mode guard runs at connect time, and there is no code path in this
 package that can send a ``buy``.
 """
 

@@ -46,7 +46,7 @@ from config import Config
 from indicators import atr, classify_trend, ema, find_swing_levels, nearest_level, rsi
 from logger_config import get_logger
 from market_data import Candle, CandleSeries
-from strategy import Strategy
+from strategy import Strategy, strategy_for_market
 
 log = get_logger("backtest")
 
@@ -178,7 +178,7 @@ class Backtester:
     def __init__(self, cfg: Config, payout_multiple: float = 1.95,
                  strategy: Optional[Strategy] = None) -> None:
         self.cfg = cfg
-        self.strategy = strategy or Strategy(cfg)
+        self.strategy = strategy
         self.payout_multiple = payout_multiple
 
     # ------------------------------------------------------------------
@@ -251,7 +251,11 @@ class Backtester:
                 "1h": CandleSeries(symbol, 3600, w1h),
             }
 
-            sig = self.strategy.evaluate(symbol, series, now=now)
+            active_strategy = self.strategy or (
+                Strategy(self.cfg) if symbol.upper().startswith(("BOOM", "CRASH"))
+                else strategy_for_market(symbol, self.cfg)
+            )
+            sig = active_strategy.evaluate(symbol, series, now=now)
             if not sig.actionable:
                 continue
             if sig.candle_epoch is not None and sig.candle_epoch == last_signal_epoch:
@@ -321,7 +325,11 @@ class Backtester:
                 "5m": CandleSeries(symbol, 300, w5),
                 "1h": CandleSeries(symbol, 3600, w1h),
             }
-            sig = self.strategy.evaluate(symbol, series, now=now)
+            active_strategy = self.strategy or (
+                Strategy(self.cfg) if symbol.upper().startswith(("BOOM", "CRASH"))
+                else strategy_for_market(symbol, self.cfg)
+            )
+            sig = active_strategy.evaluate(symbol, series, now=now)
             if sig.actionable:
                 entries.append((i, sig.direction))
 
@@ -574,7 +582,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 sym, c1m, c5m, c1h, initial_balance=args.balance,
                 payout_multiple=(float(estimate["payout_multiple"])
                                  if observed else fallback_payout),
-                payout_source=("recent settled demo wins" if observed
+                payout_source=("recent settled wins" if observed
                                else "configured fallback"),
                 payout_samples=int(estimate.get("samples", 0)),
             ))

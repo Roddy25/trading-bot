@@ -9,12 +9,11 @@
 </head>
 <body>
 
-<!-- DEMO-ONLY BANNER — identical to the dashboard, never dismissible -->
-<div id="demo-banner" class="demo-banner" role="status">
+<div id="account-mode-banner" class="demo-banner" role="status">
   <span class="demo-dot"></span>
-  <strong>DEMO MODE ONLY</strong>
+  <strong id="mode-banner-title">DEMO MODE</strong>
   <span class="demo-sep">·</span>
-  <span>This bot refuses to trade a real-money account. There is no setting to change that.</span>
+  <span id="mode-banner-text">Demo mode is the default. Live mode uses real money.</span>
 </div>
 
 <header class="topbar">
@@ -80,18 +79,30 @@
       </div>
 
       <div class="field">
+        <label for="f-mode">Account mode</label>
+        <select id="f-mode" name="account_mode">
+          <option value="demo">Demo (recommended)</option>
+          <option value="real">Live account (real money)</option>
+        </select>
+        <div class="hint">Demo is the default. Selecting live mode allows this bot to place real-money trades on the selected account.</div>
+      </div>
+      <label class="check" id="live-confirm-row" hidden>
+        <input type="checkbox" id="f-live-confirm">
+        <span>I understand that live trades use real money and can lose the full stake on each contract.</span>
+      </label>
+
+      <div class="field">
         <label for="f-token">DERIV_API_TOKEN</label>
         <div class="input-row">
           <input type="password" id="f-token" name="token"
-                 placeholder="Paste the token from your DEMO account"
+                 placeholder="Paste a token for the selected account mode"
                  autocomplete="new-password" spellcheck="false">
           <button type="button" class="btn btn-sm" id="btn-reveal"
                   aria-label="Show or hide the token">Show</button>
         </div>
         <div class="hint">
           Alphanumeric, 15+ characters. Create it in the Deriv dashboard with
-          the <code>trade</code> scope, <b>while switched to your demo
-          (virtual) account</b>. A real-account token is refused.
+          the <code>trade</code> scope for the account type selected above.
         </div>
       </div>
 
@@ -125,8 +136,17 @@
           </div>
           <div class="field">
             <label for="f-streak">MAX_CONSECUTIVE_LOSSES</label>
-            <input type="number" id="f-streak" name="max_consecutive_losses" step="1" min="1" max="50">
-            <div class="hint">Pause after this many losses in a row.</div>
+            <input type="number" id="f-streak" name="max_consecutive_losses" step="1" min="0" max="50">
+            <div class="hint">Pause after this many losses in a row. Set to 0 to disable the stop.</div>
+          </div>
+          <div class="field field-wide">
+            <label for="f-strategy">Deriv strategy</label>
+            <select id="f-strategy" name="strategy_mode">
+              <option value="trend">Trend Confluence (current)</option>
+              <option value="grid">GRID-inspired range entries</option>
+              <option value="dca">DCA-inspired trend pullbacks</option>
+            </select>
+            <div class="hint">Deriv adaptation: each signal can open one fixed-expiry contract. It does not place a grid of pending orders or average an open position. Existing daily and per-contract risk limits still apply.</div>
           </div>
           <div class="field field-wide">
             <label>Market scanner</label>
@@ -142,7 +162,7 @@
       <label class="check">
         <input type="checkbox" id="f-verify" checked>
         <span>Verify with Deriv before saving (recommended — confirms the
-        account is demo)</span>
+        selected account type is available)</span>
       </label>
 
       <div class="form-actions">
@@ -158,9 +178,8 @@
   <section class="card">
     <div class="card-head"><h2>How this is protected</h2></div>
     <ul class="bullets">
-      <li><b>Demo-only, unchanged.</b> The guard lives in the trading client and
-          is not touched by this page. A real-money account is refused at
-          connect time regardless of what is saved here.</li>
+      <li><b>Account mode is explicit.</b> Demo is the default. Live mode is
+          selected here and checked again by the trading client at connect time.</li>
       <li><b>Token never leaves the server.</b> It is read from <code>.env</code>
           by the server process only. No API response contains it.</li>
       <li><b>Atomic write.</b> <code>.env.tmp</code> → fsync → rename, mode

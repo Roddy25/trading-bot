@@ -74,7 +74,7 @@ class OpenAIAdvisor:
                 "local_history": context.get(signal.symbol, {}),
             })
         payload = {
-            "task": "Rank these already-approved demo trade candidates by strength of supplied evidence, or skip all if evidence is weak or conflicting.",
+            "task": "Rank these already-approved trade candidates by strength of supplied evidence, or skip all if evidence is weak or conflicting.",
             "constraints": [
                 "Only use supplied data; do not claim certainty or invent market facts.",
                 "Confluence scores are not win probabilities.",
@@ -101,7 +101,7 @@ class OpenAIAdvisor:
             "max_output_tokens": 220,
             "input": [
                 {"role": "system", "content": (
-                    "You are a cautious market-signal reviewer for a demo-only bot. "
+                    "You are a cautious market-signal reviewer for a trading bot. "
                     "Use only the supplied candidate evidence. Never imply certainty. "
                     "Return the requested structured decision; do not produce trading instructions beyond ranking or skipping."
                 )},

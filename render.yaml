@@ -16,8 +16,8 @@ services:
         sync: false
       - key: DASHBOARD_PASSWORD
         sync: false
-      - key: REQUIRE_DEMO_ACCOUNT
-        value: "true"
+      - key: ACCOUNT_MODE
+        value: demo
       - key: DB_PATH
         value: /tmp/bot.db
       - key: CSV_PATH

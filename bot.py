@@ -6,7 +6,7 @@ Startup sequence (any failure here stops the bot before it can trade):
     1. load + validate config
     2. set up logging (with token redaction)
     3. open storage, reconcile any unresolved contracts
-    4. connect to Deriv and POSITIVELY confirm the account is demo
+    4. connect to Deriv and confirm the configured account mode
     5. resolve the real symbol codes for the configured indices
     6. verify the contract type is offered on each market
     7. enter the scan loop
@@ -74,15 +74,16 @@ class TradingBot:
     # ==================================================================
     def startup(self) -> bool:
         log.info("=" * 68)
-        log.info("Deriv Volatility Bot — DEMO ONLY")
+        log.info("Deriv Volatility Bot — %s ACCOUNT MODE",
+                 self.cfg.account_mode.upper())
         log.info("=" * 68)
 
-        # --- connect + demo verification ------------------------------
+        # --- connect + account-mode verification -----------------------
         try:
             info = self.client.connect()
         except DemoAccountRequired as exc:
             log.error("")
-            log.error("  *** DEMO-ONLY PROTECTION TRIGGERED ***")
+            log.error("  *** ACCOUNT MODE CHECK FAILED ***")
             log.error("  %s", exc)
             log.error("  No purchase will be attempted. Exiting.")
             log.error("")
@@ -94,14 +95,21 @@ class TradingBot:
             log.error("Could not connect to Deriv: %s", exc)
             return False
 
-        # Re-assert the invariant one final time before any trading code runs.
-        if info.get("account_type") != "demo":
-            log.error("DEMO-ONLY: account type is %r — refusing to run",
-                      info.get("account_type"))
+        # Re-assert the selected mode before any trading code runs.
+        if info.get("account_type") != self.cfg.account_mode:
+            log.error("Account mode is %r; expected %r — refusing to run",
+                      info.get("account_type"), self.cfg.account_mode)
             return False
 
-        log.info("DEMO MODE CONFIRMED — account %s, balance %s %s",
-                 info["account_id"], info["balance"], info["currency"])
+        if (info.get("currency") and
+                str(info["currency"]).upper() != self.cfg.currency.upper()):
+            log.error("Account currency %s does not match configured currency %s",
+                      info["currency"], self.cfg.currency)
+            return False
+
+        log.warning("%s ACCOUNT CONFIRMED — account %s, balance %s %s",
+                    self.cfg.account_mode.upper(), info["account_id"],
+                    info["balance"], info["currency"])
 
         # --- reconcile any contracts left over from a previous run -----
         try:
@@ -230,10 +238,9 @@ class TradingBot:
             elif sig.strategy_id == "boom_crash_spike_fade_v1":
                 sig.selected_duration = 300
                 sig.selected_duration_unit = "s"
-            if sig.actionable:
-                sig.shadow_id = self.storage.record_shadow_signal(
-                    sig, sig.selected_duration or self.cfg.duration
-                )
+            sig.shadow_id = self.storage.record_shadow_signal(
+                sig, sig.selected_duration or self.cfg.duration
+            )
             self._log_signal(sig)
 
             # 5. Never re-enter on the same completed candle.

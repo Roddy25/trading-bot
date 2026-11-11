@@ -124,18 +124,24 @@ class WebBot(TradingBot):
             "selected_policy": None,
         })
 
+    def _research_strategy_id(self) -> str:
+        # Use the configured non-Boom strategy for the dashboard summary.
+        return getattr(strategy_for_market("R_10", self.cfg), "strategy_id",
+                       "trend_confluence_v1")
+
     # -- startup: mirrors bot.py's sequence, but records the failure reason --
     def startup(self) -> bool:
         log.info("=" * 68)
-        log.info("Deriv Volatility Bot — DEMO ONLY (web control panel)")
+        log.info("Deriv Volatility Bot — %s ACCOUNT MODE (web control panel)",
+                 self.cfg.account_mode.upper())
         log.info("=" * 68)
 
         try:
             info = self.client.connect()
         except DemoAccountRequired as exc:
-            log.error("*** DEMO-ONLY PROTECTION TRIGGERED ***")
+            log.error("*** ACCOUNT MODE CHECK FAILED ***")
             log.error("%s", exc)
-            STATE.set_status(ERROR, "Demo-only guard blocked the connection.",
+            STATE.set_status(ERROR, "Account mode check blocked the connection.",
                              error=str(exc))
             return False
         except AuthError as exc:
@@ -147,16 +153,25 @@ class WebBot(TradingBot):
             STATE.set_status(ERROR, "Could not connect to Deriv.", error=str(exc))
             return False
 
-        # Re-assert the invariant before any trading code can run.
-        if info.get("account_type") != "demo":
-            msg = (f"DEMO-ONLY: account type is {info.get('account_type')!r} "
-                   f"— refusing to run")
+        # Re-assert the selected mode before any trading code can run.
+        if info.get("account_type") != self.cfg.account_mode:
+            msg = (f"Account type is {info.get('account_type')!r}; expected "
+                   f"{self.cfg.account_mode!r} — refusing to run")
             log.error(msg)
-            STATE.set_status(ERROR, "Account is not a demo account.", error=msg)
+            STATE.set_status(ERROR, "Account mode mismatch.", error=msg)
+            return False
+
+        if (info.get("currency") and
+                str(info["currency"]).upper() != self.cfg.currency.upper()):
+            msg = (f"Account currency {info['currency']} does not match "
+                   f"configured currency {self.cfg.currency}")
+            log.error(msg)
+            STATE.set_status(ERROR, "Account currency mismatch.", error=msg)
             return False
 
         STATE.set_account(info)
-        log.info("DEMO MODE CONFIRMED — account %s, balance %s %s",
+        log.warning("%s ACCOUNT CONFIRMED — account %s, balance %s %s",
+                 self.cfg.account_mode.upper(),
                  info["account_id"], info["balance"], info["currency"])
 
         try:
@@ -174,17 +189,26 @@ class WebBot(TradingBot):
             return False
 
         log.info("Available markets: %s", ", ".join(symbols.values()))
+        strategy_label = {
+            "trend": "trend confluence",
+            "grid": "GRID-inspired range entries",
+            "dca": "DCA-inspired trend pullbacks",
+        }.get(self.cfg.deriv_strategy_mode, self.cfg.deriv_strategy_mode)
+        log.info("Deriv strategy mode: %s (single fixed-expiry contracts)",
+                 strategy_label)
         log.info("Stake: %.2f %s | Duration: %d%s | Max open: %d",
                  self.cfg.stake, self.cfg.currency, self.cfg.duration,
                  self.cfg.duration_unit, self.cfg.max_open_contracts)
         trade_cap = (f"{self.cfg.max_trades_per_day} trades/day"
                      if self.cfg.max_trades_per_day > 0
                      else "unlimited daily entries")
+        streak_stop = (f"{self.cfg.max_consecutive_losses} consecutive losses"
+                       if self.cfg.max_consecutive_losses > 0
+                       else "consecutive-loss stop off")
         log.info("Risk: daily loss %.2f | daily profit target %.2f | "
-                 "%d consecutive losses | %s | %ds cooldown",
+                 "%s | %s | %ds cooldown",
                  self.cfg.daily_loss_limit, self.cfg.daily_profit_target,
-                 self.cfg.max_consecutive_losses, trade_cap,
-                 self.cfg.cooldown_seconds)
+                 streak_stop, trade_cap, self.cfg.cooldown_seconds)
         return True
 
     # -- the loop, with a pause gate between iterations -------------------
@@ -226,7 +250,7 @@ class WebBot(TradingBot):
             log.info("Paused — %s", decision.reason)
             self._publish_scanner_skipped(decision.reason)
             research = self.ai_brain.research_state(
-                getattr(self.strategy, "strategy_id", "trend_confluence_v1")
+                self._research_strategy_id()
             )
             STATE.set_brain({
                 "enabled": self.cfg.ai_brain_enabled,
@@ -239,7 +263,7 @@ class WebBot(TradingBot):
             })
             return
 
-        study = (self.ai_brain.research_state()
+        study = (self.ai_brain.research_state(self._research_strategy_id())
                  if self.cfg.ai_brain_enabled else
                  {"enabled": False,
                   "status": "Disabled — using strategy score only.",
@@ -297,10 +321,9 @@ class WebBot(TradingBot):
                     "source": "multiplier auto-management",
                     "note": "Close at +/-50% of stake or after 300 seconds.",
                 }
-            if sig.actionable:
-                sig.shadow_id = self.storage.record_shadow_signal(
-                    sig, sig.selected_duration or self.cfg.duration
-                )
+            sig.shadow_id = self.storage.record_shadow_signal(
+                sig, sig.selected_duration or self.cfg.duration
+            )
             self._log_signal(sig)
 
             repeat = False
@@ -575,6 +598,8 @@ class BotService:
             pass
         return {
             "configured": has_app_id and has_token,
+            "account_mode": (os.getenv("ACCOUNT_MODE") or "demo").strip().lower(),
+            "strategy_mode": (os.getenv("DERIV_STRATEGY_MODE") or "trend").strip().lower(),
             "app_id_present": has_app_id,
             "token_present": has_token,
             "dotenv_present": dotenv_present,
@@ -853,7 +878,7 @@ def run_backtest(symbols: List[str], count: int = 1000,
                             if observed else payout)
         res = bt.run(
             sym, c1m, c5m, c1h, payout_multiple=effective_payout,
-            payout_source=("recent settled demo wins" if observed
+            payout_source=("recent settled wins" if observed
                            else "configured fallback"),
             payout_samples=int(estimate.get("samples", 0)),
         )
@@ -874,7 +899,7 @@ def run_backtest(symbols: List[str], count: int = 1000,
             if s["trades"] else None,
             "payout_multiple": effective_payout,
             "payout_samples": int(estimate.get("samples", 0)),
-            "payout_source": ("recent settled demo wins" if observed
+            "payout_source": ("recent settled wins" if observed
                               else "configured fallback"),
             "bars_1m": len(c1m),
             "error": None,
@@ -920,7 +945,7 @@ def run_backtest(symbols: List[str], count: int = 1000,
         "assumptions": [
             "Entry at the NEXT bar's open — no look-ahead.",
             "1-minute expiry; a tie counts as a LOSS.",
-            "Payout per market uses recent settled demo wins when at least 8 "
+            "Payout per market uses recent settled wins when at least 8 "
             f"observations exist; otherwise uses the {payout}x configured fallback.",
             "Spread and slippage are NOT modelled.",
             "Synthetic indices have no order book, so fills are assumed exact.",

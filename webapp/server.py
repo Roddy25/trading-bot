@@ -23,7 +23,7 @@ Security posture
 * Binds ``127.0.0.1`` by default. Any other host prints a loud warning.
 * **No endpoint can place a trade.** The only way to trade is ``/api/bot/start``,
   which starts the unmodified engine; every purchase still passes
-  ``RiskManager.can_trade`` and the demo-only guard inside ``DerivClient``.
+  ``RiskManager.can_trade`` and the account-mode guard inside ``DerivClient``.
 * The API token is never read into a response. ``/api/status`` reports
   booleans only. A ``_scrub`` pass runs over every JSON body as a last line of
   defence, and responses carry ``Cache-Control: no-store``.
@@ -218,7 +218,7 @@ def api_settings_post() -> Response:
       1. Host header must be loopback/LAN (the global before_request guard).
       2. CSRF double-submit: X-CSRF-Token must equal the dv_csrf cookie.
       3. App ID numeric, token format sane, no placeholders.
-      4. Optional live Deriv check — a real-money account is refused.
+      4. Optional Deriv check — selected account type must exist.
       5. Atomic write to .env with mode 0600.
     """
     # --- CSRF ---------------------------------------------------------
@@ -257,12 +257,21 @@ def api_settings_post() -> Response:
 
     # --- live check ----------------------------------------------------
     live: Dict[str, Any] = {"checked": False}
+    account_mode = str(body.get("account_mode") or "demo").strip().lower()
+    if account_mode not in ("demo", "real"):
+        return _err("Account mode must be demo or real.", 422, "invalid_setting")
+    if account_mode == "real" and body.get("confirm_live") is not True:
+        return _err("Explicit live trading confirmation is required.", 422,
+                    "live_confirmation_required")
+
     if verify_live:
-        result = settings_store.check_with_deriv(app_id, token)
+        result = settings_store.check_with_deriv(app_id, token, account_mode)
         live = {
             "checked": True,
             "reachable": result["ok"],
             "demo": result.get("demo"),
+            "account_mode": account_mode,
+            "mode_available": result.get("mode_available"),
             "accounts": result.get("accounts", []),
             "error": result.get("error"),
         }
@@ -276,18 +285,28 @@ def api_settings_post() -> Response:
                 ),
                 422, "auth_failed",
             )
-        if not result.get("demo"):
+        mode_available = result.get("mode_available")
+        if mode_available is None and account_mode == "demo":
+            mode_available = result.get("demo")
+        if not mode_available:
+            if account_mode == "demo" and "real" in result.get("accounts", []):
+                return _err(
+                    "The selected mode is demo-only, but this token has only "
+                    "a real account. Select live mode only if you intend to "
+                    "trade with real money.",
+                    422, "real_account_rejected",
+                )
             return _err(
-                "This token has no demo (virtual) account. The bot is "
-                "demo-only by design and will refuse to run on a real-money "
-                "account. Create a demo account and a token from it.",
-                422, "real_account_rejected",
+                f"This token has no {account_mode} account. Available account "
+                f"types: {', '.join(result.get('accounts', [])) or 'none'}.",
+                422, "account_mode_unavailable",
             )
 
     # --- persist -------------------------------------------------------
     updates: Dict[str, str] = {
         "DERIV_APP_ID": app_id,
         "DERIV_API_TOKEN": token,
+        "ACCOUNT_MODE": account_mode,
     }
     updates.update(optional)
 
@@ -339,6 +358,10 @@ def api_trading_settings_post() -> Response:
     ok, msg, updates = settings_store.validate_optional(body)
     if not ok:
         return _err(msg, 422, "invalid_setting")
+    if (updates.get("ACCOUNT_MODE") == "real"
+            and body.get("confirm_live") is not True):
+        return _err("Explicit live trading confirmation is required.", 422,
+                    "live_confirmation_required")
     if not updates:
         return _err("Enter at least one trading setting.", 422, "empty_settings")
 
@@ -433,7 +456,7 @@ def api_backtest_csv() -> Response:
 def api_health() -> Response:
     return _ok({
         "status": "healthy",
-        "demo_only": True,
+        "account_mode": SERVICE.config_state().get("account_mode", "demo"),
         "bot_state": STATE.status,
         "uptime_seconds": STATE.snapshot(False)["uptime_seconds"],
     })
@@ -610,7 +633,8 @@ def main(argv: list[str] | None = None) -> int:
     print("=" * 70)
     print("  Deriv Volatility Bot — WEB CONTROL PANEL")
     print("=" * 70)
-    print("  DEMO MODE ONLY — this panel cannot enable real-money trading.")
+    configured_mode = (os.environ.get("ACCOUNT_MODE") or "demo").upper()
+    print(f"  ACCOUNT MODE: {configured_mode} (demo is the default)")
     print()
     print(f"  Open:  http://{url_host}:{args.port}/")
     if not local_only:

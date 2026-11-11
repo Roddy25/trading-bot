@@ -60,13 +60,17 @@
 
         // Prefill only the non-secret fields.
         if (d.app_id) { $('f-appid').value = d.app_id; }
+        $('f-mode').value = d.account_mode || 'demo';
+        updateModeWarning();
         $('f-stake').value = d.stake || '';
         $('f-max-open').value = d.max_open_contracts || '3';
         $('f-take-profit').value = d.daily_profit_target || '0';
         $('f-loss').value = d.daily_loss_limit || '';
         $('f-trades').value = d.max_trades_per_day === 0 || d.max_trades_per_day === '0'
           ? '0' : (d.max_trades_per_day || '');
-        $('f-streak').value = d.max_consecutive_losses || '';
+        $('f-streak').value = d.max_consecutive_losses === 0 || d.max_consecutive_losses === '0'
+          ? '0' : (d.max_consecutive_losses || '');
+        $('f-strategy').value = d.strategy_mode || 'trend';
 
         var conn = $('conn-label');
         conn.textContent = d.configured ? 'Configured' : 'Not configured';
@@ -84,6 +88,14 @@
 
     var token = $('f-token').value.trim();
     var appId = $('f-appid').value.trim();
+    var mode = $('f-mode').value;
+
+    if (mode === 'real' && !$('f-live-confirm').checked) {
+      showResult('error', 'Live mode confirmation required',
+        ['Confirm that live trades use real money and can lose the full stake.']);
+      $('f-live-confirm').focus();
+      return;
+    }
 
     if (!appId) {
       showResult('error', 'App ID required',
@@ -93,7 +105,7 @@
     }
     if (!token) {
       showResult('error', 'Token required',
-        ['Paste the token created from your DEMO account.']);
+        ['Paste a token associated with the selected account mode.']);
       $('f-token').focus();
       return;
     }
@@ -101,6 +113,8 @@
     var payload = {
       app_id: appId,
       token: token,
+      account_mode: mode,
+      confirm_live: $('f-live-confirm').checked,
       verify_live: $('f-verify').checked
     };
     var optional = {
@@ -109,7 +123,8 @@
       daily_profit_target: $('f-take-profit').value,
       daily_loss_limit: $('f-loss').value,
       max_trades_per_day: $('f-trades').value,
-      max_consecutive_losses: $('f-streak').value
+      max_consecutive_losses: $('f-streak').value,
+      strategy_mode: $('f-strategy').value
     };
     for (var k in optional) {
       if (Object.prototype.hasOwnProperty.call(optional, k) && optional[k] !== '') {
@@ -142,8 +157,8 @@
           if (body.code === 'csrf_failed') {
             lines.push('Reload this page and try again.');
           }
-          if (body.code === 'real_account_rejected') {
-            lines.push('The bot is demo-only by design — this cannot be overridden.');
+          if (body.code === 'account_mode_unavailable' || body.code === 'real_account_rejected') {
+            lines.push('Select an account mode that is available to this token.');
           }
           showResult('error', 'Not saved (HTTP ' + res.status + ')', lines);
           return;
@@ -160,7 +175,7 @@
           lines.push('Preserved: ' + d.preserved_keys.join(', '));
         }
         if (d.live_check && d.live_check.checked) {
-          lines.push('Deriv check: token accepted, demo account found');
+          lines.push('Deriv check: token accepted, ' + d.account_mode + ' account found');
         }
         lines.push(d.message);
 
@@ -186,7 +201,8 @@
       daily_profit_target: $('f-take-profit').value,
       daily_loss_limit: $('f-loss').value,
       max_trades_per_day: $('f-trades').value,
-      max_consecutive_losses: $('f-streak').value
+      max_consecutive_losses: $('f-streak').value,
+      strategy_mode: $('f-strategy').value
     };
     btn.disabled = true;
     btn.textContent = 'Saving…';
@@ -224,11 +240,22 @@
       });
   }
 
+  function updateModeWarning() {
+    var live = $('f-mode').value === 'real';
+    $('live-confirm-row').hidden = !live;
+    if (!live) { $('f-live-confirm').checked = false; }
+    setText('mode-banner-title', live ? 'LIVE ACCOUNT' : 'DEMO ACCOUNT');
+    setText('mode-banner-text', live
+      ? 'Live mode can place real-money trades and lose the full stake.'
+      : 'Demo mode is the default. Live mode uses real money.');
+  }
+
   /* --------------------------------------------------------------- init */
   document.addEventListener('DOMContentLoaded', function () {
     loadState();
 
     $('settings-form').addEventListener('submit', submit);
+    $('f-mode').addEventListener('change', updateModeWarning);
     $('btn-save-trading').addEventListener('click', saveTradingSettings);
 
     $('btn-reveal').addEventListener('click', function () {

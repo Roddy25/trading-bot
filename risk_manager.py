@@ -26,6 +26,33 @@ from config import Config
 from storage import Storage
 
 
+def martingale_stake(
+    base_stake: float,
+    consecutive_losses: int,
+    multiplier: float = 2.0,
+    max_steps: int = 2,
+    max_stake: Optional[float] = None,
+) -> float:
+    """Calculate a capped stake progression from the current loss streak.
+
+    With the defaults, the stake doubles after each settled loss (for example,
+    1 -> 2 -> 4), then stays at the configured step/amount cap. Pass zero
+    losses after a win to return to the base stake.
+    """
+    if base_stake <= 0:
+        raise ValueError("base_stake must be positive")
+    if multiplier < 1:
+        raise ValueError("multiplier must be at least 1")
+    if max_steps < 0:
+        raise ValueError("max_steps cannot be negative")
+    cap = float("inf") if max_stake is None else max_stake
+    if cap < base_stake:
+        raise ValueError("max_stake must be at least base_stake")
+
+    steps = min(max(0, int(consecutive_losses)), int(max_steps))
+    return round(min(base_stake * multiplier ** steps, cap), 2)
+
+
 @dataclass
 class RiskDecision:
     """Outcome of a risk check."""
@@ -79,6 +106,10 @@ class RiskManager:
     def check_daily_loss(self, next_stake: Optional[float] = None) -> RiskDecision:
         state = self.storage.get_daily_state()
         pnl = state["realised_pnl"]
+        open_exposure = sum(
+            max(0.0, float(trade.get("stake") or 0.0))
+            for trade in self.storage.get_open_trades()
+        )
         if pnl <= -abs(self.cfg.daily_loss_limit):
             return RiskDecision(
                 False,
@@ -86,11 +117,13 @@ class RiskManager:
                 f"(limit -{self.cfg.daily_loss_limit:.2f})",
                 "daily_loss_limit",
             )
-        if next_stake is not None and pnl - next_stake <= -abs(self.cfg.daily_loss_limit):
+        if (next_stake is not None and
+                pnl - open_exposure - next_stake <= -abs(self.cfg.daily_loss_limit)):
             return RiskDecision(
                 False,
-                f"next stake {next_stake:.2f} could reach the daily loss limit "
-                f"from P/L {pnl:.2f} (limit -{self.cfg.daily_loss_limit:.2f})",
+                f"realised P/L {pnl:.2f} plus open exposure {open_exposure:.2f} "
+                f"and next stake {next_stake:.2f} could reach the daily loss "
+                f"limit (limit -{self.cfg.daily_loss_limit:.2f})",
                 "daily_loss_limit",
             )
         return RiskDecision(True)
@@ -124,7 +157,8 @@ class RiskManager:
 
     def check_consecutive_losses(self) -> RiskDecision:
         losses = self.storage.get_consecutive_losses()
-        if losses >= self.cfg.max_consecutive_losses:
+        if (self.cfg.max_consecutive_losses > 0 and
+                losses >= self.cfg.max_consecutive_losses):
             return RiskDecision(
                 False,
                 f"{losses} consecutive losses "
@@ -135,6 +169,12 @@ class RiskManager:
 
     def check_pause(self) -> RiskDecision:
         paused_until = self.storage.get_paused_until()
+        if self.cfg.max_consecutive_losses == 0:
+            # A pause created by the now-disabled consecutive-loss stop must
+            # not keep the bot idle. Preserve the streak for Martingale sizing.
+            if paused_until is not None:
+                self.storage.set_paused_until(None)
+            return RiskDecision(True)
         if paused_until is None:
             return RiskDecision(True)
         now = self.storage.now()
@@ -183,13 +223,13 @@ class RiskManager:
         """Return the configured stake or a capped loss-recovery stake."""
         if not self.cfg.martingale_enabled:
             return self.cfg.stake
-        steps = min(self.storage.get_consecutive_losses(),
-                    self.cfg.martingale_max_steps)
-        if steps == 0:
-            return self.cfg.stake
-        amount = min(self.cfg.stake * self.cfg.martingale_multiplier ** steps,
-                     self.cfg.martingale_max_stake)
-        return round(amount, 2)
+        return martingale_stake(
+            base_stake=self.cfg.stake,
+            consecutive_losses=self.storage.get_consecutive_losses(),
+            multiplier=self.cfg.martingale_multiplier,
+            max_steps=self.cfg.martingale_max_steps,
+            max_stake=self.cfg.martingale_max_stake,
+        )
 
     # ------------------------------------------------------------------
     # Aggregate
@@ -240,15 +280,16 @@ class RiskManager:
         """
         Call once a contract reaches a final state.
 
-        Updates realised P/L, the consecutive-loss counter, and — if the
-        streak limit is hit — sets the pause window.
+        Updates realised P/L and the consecutive-loss counter. If the streak
+        stop is enabled and its limit is hit, it sets the pause window.
         """
         self.storage.add_realised_pnl(profit)
 
         if profit < 0:
             losses = self.storage.get_consecutive_losses() + 1
             self.storage.set_consecutive_losses(losses)
-            if losses >= self.cfg.max_consecutive_losses:
+            if (self.cfg.max_consecutive_losses > 0 and
+                    losses >= self.cfg.max_consecutive_losses):
                 if self.cfg.loss_cooldown_minutes > 0:
                     until = self.storage.now() + timedelta(
                         minutes=self.cfg.loss_cooldown_minutes

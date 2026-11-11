@@ -132,6 +132,9 @@ const STATE_LABEL = {
 
 function renderStatus(snap) {
   const status = snap.status || 'stopped';
+  const acct = snap.account;
+  const mode = (acct && acct.account_type) ||
+    (snap.config && snap.config.account_mode) || 'demo';
 
   const badge = $('state-badge');
   badge.textContent = STATE_LABEL[status] || status.toUpperCase();
@@ -143,8 +146,8 @@ function renderStatus(snap) {
   const dot = $('conn-dot');
   const label = $('conn-label');
   dot.className = 'conn-dot';
-  if (status === 'running') { dot.classList.add('live'); label.textContent = 'Connected · live'; }
-  else if (status === 'paused') { dot.classList.add('paused'); label.textContent = 'Connected · paused'; }
+  if (status === 'running') { dot.classList.add('live'); label.textContent = mode === 'real' ? 'Connected · real funds' : 'Connected · demo'; }
+  else if (status === 'paused') { dot.classList.add('paused'); label.textContent = mode === 'real' ? 'Real account · paused' : 'Demo account · paused'; }
   else if (status === 'error') { dot.classList.add('err'); label.textContent = 'Error'; }
   else if (status === 'starting' || status === 'stopping') { label.textContent = status === 'starting' ? 'Connecting…' : 'Stopping…'; }
   else if (status === 'not_configured') { label.textContent = 'Not configured'; }
@@ -160,7 +163,10 @@ function renderStatus(snap) {
   $('btn-resume').disabled = !paused;
 
   // Account box
-  const acct = snap.account;
+  $('mode-banner-title').textContent = mode === 'real' ? 'LIVE ACCOUNT' : 'DEMO ACCOUNT';
+  $('mode-banner-text').textContent = mode === 'real'
+    ? 'Live mode can place real-money trades. Monitor exposure and risk limits.'
+    : 'Demo mode is selected. Change account mode in Settings to use a live account.';
   if (acct && acct.account_id) {
     $('account-box').hidden = false;
     $('acct-id').textContent = acct.account_id;
@@ -169,15 +175,15 @@ function renderStatus(snap) {
     $('account-box').hidden = true;
   }
 
-  // Danger banner: only for a genuine demo violation, not a generic error.
+  // Account mode guard errors are distinct from other startup failures.
   const danger = $('danger-banner');
   const errText = (snap.error || '') + ' ' + (snap.status_detail || '');
-  const isDemoViolation = /demo-only|not a demo|real-money|real account/i.test(errText);
-  if (isDemoViolation) {
+  const isModeViolation = /account.mode.protection|no (demo|real) account found|account type is/i.test(errText);
+  if (isModeViolation) {
     danger.hidden = false;
-    $('danger-title').textContent = 'NOT A DEMO ACCOUNT';
+    $('danger-title').textContent = 'ACCOUNT MODE MISMATCH';
     $('danger-text').textContent =
-      'The bot refused to connect. Use an API token created from your DERIV DEMO account.';
+      'The bot refused to connect. Check ACCOUNT_MODE and the account associated with your token.';
   } else {
     danger.hidden = true;
   }
@@ -196,7 +202,7 @@ function renderStatus(snap) {
   }
 
   // Error card
-  const showErr = snap.error && !isDemoViolation;
+  const showErr = snap.error && !isModeViolation;
   $('error-card').hidden = !showErr;
   if (showErr) {
     $('error-title').textContent =
@@ -231,9 +237,19 @@ function renderStatus(snap) {
       ).join('  |  ')
     : 'No approved signals ranked yet.';
   const profileStats = brain.policy_stats || {};
+  const profileParameters = brain.profile_parameters || {};
   const studyText = Object.entries(profileStats).map(([name, row]) => {
     const rate = row.win_rate == null ? 'not measured' : `${row.win_rate}% wins`;
-    return `${name}: ${row.trades} trades, ${rate}, flat P/L ${row.flat_net_profit}, DD ${row.max_drawdown}, avg W/L ${row.average_win}/${row.average_loss}, longest loss run ${row.max_losing_streak}`;
+    const params = profileParameters[name];
+    const settings = params
+      ? `score ≥${params.min_signal_score}, RSI ${params.rsi_min}–${params.rsi_max}${params.parent ? `, gen ${params.generation} from ${params.parent}` : ''}`
+      : '';
+    return `${name}: ${settings}, ${row.trades} trades, ${rate}, flat P/L ${row.flat_net_profit}, DD ${row.max_drawdown}, avg W/L ${row.average_win}/${row.average_loss}, longest loss run ${row.max_losing_streak}`;
+  }).join('  |  ');
+  const shadowProfileStats = brain.shadow_policy_stats || {};
+  const shadowProfileText = Object.entries(shadowProfileStats).map(([name, row]) => {
+    const accuracy = row.decision_accuracy == null ? 'not measured' : `${row.decision_accuracy}% gate accuracy`;
+    return `${name}: ${row.trades} approved shadows (${row.wins} wins), ${row.filtered_trades} filtered (${row.filtered_wins} would-win), ${accuracy}`;
   }).join('  |  ');
   const durationStudies = ranked.flatMap((item) => (item.duration_study || []).map((row) =>
     `${item.symbol} ${row.duration_minutes}m: ${row.validation_win_rate}% over ${row.validation_trades} validation trades, P/L ${row.validation_net_profit}, DD ${row.validation_drawdown}, payout ${row.payout_multiple}x (${row.payout_samples} observed wins)`
@@ -252,6 +268,7 @@ function renderStatus(snap) {
     ? `Martingale vs flat stake (${mg.trades} settled): ${mg.martingale_net_profit} / ${mg.martingale_max_drawdown} DD vs ${mg.flat_net_profit} / ${mg.flat_max_drawdown} DD (flat result estimated)${mgByMarket ? ` · by market ${mgByMarket}` : ''}`
     : '';
   const detailText = [studyText && `Strategy profiles: ${studyText}`,
+    shadowProfileText && `Shadow profile learning: ${shadowProfileText}`,
     durationStudies && `Duration tests: ${durationStudies}`,
     priceActionStudies && `Price action by market/setup: ${priceActionStudies}`,
     shadowStudies && `Shadow setups: ${shadowStudies}`,
@@ -317,19 +334,20 @@ function renderRisk(snap) {
 
   // Consecutive losses
   const streak = Number(r.consecutive_losses || 0);
-  const maxStreak = Number(r.max_consecutive_losses || 3);
-  $('m-streak').textContent = `${streak} / ${maxStreak}`;
-  $('m-streak').className = 'metric-value ' + (streak >= maxStreak ? 'neg' : streak > 0 ? 'warn' : '');
-  const sPct = maxStreak ? Math.min(100, (streak / maxStreak) * 100) : 0;
+  const maxStreak = Number(r.max_consecutive_losses ?? 0);
+  const streakStopEnabled = maxStreak > 0;
+  $('m-streak').textContent = streakStopEnabled ? `${streak} / ${maxStreak}` : `${streak} (stop off)`;
+  $('m-streak').className = 'metric-value ' + (streakStopEnabled && streak >= maxStreak ? 'neg' : streak > 0 ? 'warn' : '');
+  const sPct = streakStopEnabled ? Math.min(100, (streak / maxStreak) * 100) : 0;
   const sBar = $('bar-streak');
   sBar.style.width = sPct + '%';
-  sBar.className = 'bar-fill ' + (streak >= maxStreak ? 'bad' : streak > 0 ? 'warn' : 'good');
+  sBar.className = 'bar-fill ' + (streakStopEnabled && streak >= maxStreak ? 'bad' : streakStopEnabled && streak > 0 ? 'warn' : 'good');
   const martingaleNote = r.martingale_enabled
     ? ` · recovery step ${r.martingale_step}/${Number(r.martingale_max_steps || 0)}, next stake ${fmtMoney(r.next_stake, cur)}`
     : ' · martingale off';
-  $('m-streak-sub').textContent = (streak >= maxStreak
-    ? 'Paused — reset required'
-    : `${maxStreak - streak} more before pause`) + martingaleNote;
+  $('m-streak-sub').textContent = (streakStopEnabled
+    ? (streak >= maxStreak ? 'Paused — reset required' : `${maxStreak - streak} more before pause`)
+    : 'Consecutive-loss stop disabled') + martingaleNote;
 
   // Trades today
   const used = Number(r.trades_today || 0);

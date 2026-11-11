@@ -135,6 +135,16 @@ CREATE TABLE IF NOT EXISTS shadow_signals (
 );
 CREATE INDEX IF NOT EXISTS idx_shadow_pending
     ON shadow_signals(symbol, resolved, exit_candle_epoch);
+
+CREATE TABLE IF NOT EXISTS adaptive_strategy_profiles (
+    strategy_id  TEXT NOT NULL,
+    profile_id   TEXT NOT NULL,
+    parameters   TEXT NOT NULL,
+    parent_id    TEXT NOT NULL,
+    generation   INTEGER NOT NULL DEFAULT 1,
+    created_at   TEXT NOT NULL,
+    PRIMARY KEY (strategy_id, profile_id)
+);
 """
 
 
@@ -660,6 +670,94 @@ class Storage:
                  "trades": int(row["trades"]), "wins": int(row["wins"] or 0),
                  "win_rate": round(100 * int(row["wins"] or 0) /
                                    int(row["trades"]), 1)} for row in rows]
+
+    def shadow_policy_performance(self, strategy_id: str
+                                  ) -> Dict[str, Dict[str, int]]:
+        """Summarize approved and filtered directional shadows by profile."""
+        rows = self._conn.execute(
+            """SELECT strategy_variant,signal_approved,COUNT(*) AS trades,
+                      SUM(won) AS wins
+               FROM shadow_signals
+               WHERE strategy_id=? AND resolved=1 AND selected_for_trade=0
+               GROUP BY strategy_variant,signal_approved""", (strategy_id,),
+        ).fetchall()
+        result: Dict[str, Dict[str, int]] = {}
+        for row in rows:
+            item = result.setdefault(row["strategy_variant"], {
+                "trades": 0, "wins": 0, "filtered_trades": 0,
+                "filtered_wins": 0,
+            })
+            if row["signal_approved"]:
+                item["trades"] = int(row["trades"])
+                item["wins"] = int(row["wins"] or 0)
+            else:
+                item["filtered_trades"] = int(row["trades"])
+                item["filtered_wins"] = int(row["wins"] or 0)
+        for item in result.values():
+            item["total_trades"] = item["trades"] + item["filtered_trades"]
+            # Correctly approved wins and correctly filtered losses measure
+            # whether this profile's gate accepted good directional outcomes.
+            item["decision_correct"] = (
+                item["wins"] + item["filtered_trades"] - item["filtered_wins"]
+            )
+        return result
+
+    def shadow_setup_performance(self, strategy_id: str
+                                 ) -> List[Dict[str, Any]]:
+        """Summarize approved directional shadows by market, profile, and setup."""
+        rows = self._conn.execute(
+            """SELECT symbol,strategy_id,strategy_variant,direction,setup_key,
+                      COUNT(*) AS trades,SUM(won) AS wins
+               FROM shadow_signals
+               WHERE strategy_id=? AND resolved=1 AND signal_approved=1
+                     AND selected_for_trade=0
+               GROUP BY symbol,strategy_id,strategy_variant,direction,setup_key""",
+            (strategy_id,),
+        ).fetchall()
+        return [{
+            "symbol": row["symbol"], "strategy_id": row["strategy_id"],
+            "policy": row["strategy_variant"], "direction": row["direction"],
+            "setup_key": row["setup_key"], "trades": int(row["trades"]),
+            "wins": int(row["wins"] or 0),
+        } for row in rows]
+
+    def adaptive_strategy_profiles(self, strategy_id: str
+                                   ) -> List[Dict[str, Any]]:
+        """Load persisted AI-generated parameter variants for a strategy."""
+        rows = self._conn.execute(
+            """SELECT profile_id,parameters,parent_id,generation,created_at
+               FROM adaptive_strategy_profiles WHERE strategy_id=?
+               ORDER BY generation,profile_id""", (strategy_id,),
+        ).fetchall()
+        result = []
+        for row in rows:
+            try:
+                parameters = json.loads(row["parameters"])
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(parameters, dict):
+                continue
+            result.append({
+                "profile_id": row["profile_id"], "parameters": parameters,
+                "parent_id": row["parent_id"],
+                "generation": int(row["generation"]),
+                "created_at": row["created_at"],
+            })
+        return result
+
+    def save_adaptive_strategy_profile(self, strategy_id: str, profile_id: str,
+                                       parameters: Dict[str, Any], parent_id: str,
+                                       generation: int) -> None:
+        """Persist a bounded strategy mutation before it can be selected."""
+        self._conn.execute(
+            """INSERT OR IGNORE INTO adaptive_strategy_profiles
+               (strategy_id,profile_id,parameters,parent_id,generation,created_at)
+               VALUES (?,?,?,?,?,?)""",
+            (strategy_id, profile_id,
+             json.dumps(parameters, sort_keys=True, separators=(",", ":")),
+             parent_id, int(generation), self.now().isoformat()),
+        )
+        self._conn.commit()
 
     def resolved_payout_estimates(self, symbol: str,
                                   sample_limit: int = 100) -> Dict[int, Dict[str, float]]:

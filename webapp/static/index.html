@@ -9,19 +9,16 @@
 </head>
 <body>
 
-<!-- ==================================================================
-     DEMO-ONLY BANNER — deliberately unmissable and never dismissible.
-     ================================================================== -->
-<div id="demo-banner" class="demo-banner" role="status">
+<div id="account-mode-banner" class="demo-banner" role="status">
   <span class="demo-dot"></span>
-  <strong>DEMO MODE ONLY</strong>
+  <strong id="mode-banner-title">DEMO MODE</strong>
   <span class="demo-sep">·</span>
-  <span>This bot refuses to trade a real-money account. There is no setting to change that.</span>
+  <span id="mode-banner-text">Demo mode is the default. Live mode uses real money.</span>
 </div>
 
-<!-- Shown only when the guard blocks the connection or the account is not demo -->
+<!-- Shown when the configured account mode does not match the credentials. -->
 <div id="danger-banner" class="danger-banner" hidden>
-  <strong id="danger-title">NOT A DEMO ACCOUNT</strong>
+  <strong id="danger-title">ACCOUNT MODE MISMATCH</strong>
   <span id="danger-text"></span>
 </div>
 
@@ -62,7 +59,7 @@
     <p id="setup-text">The panel is running, but the bot has no credentials yet.</p>
     <ol class="steps">
       <li>Create an application at <code>developers.deriv.com</code> and copy its <b>App ID</b>.</li>
-      <li>In the Deriv dashboard, create an API token <b>from your demo account</b> with the <code>trade</code> scope.</li>
+      <li>In the Deriv dashboard, create an API token for the account type selected in Settings, with the <code>trade</code> scope.</li>
       <li>Copy <code>.env.example</code> to <code>.env</code> and fill in both values — or enter them on the <a href="/settings">Settings</a> page.</li>
       <li>Restart the panel, then press <b>Start</b>.</li>
     </ol>
@@ -199,7 +196,7 @@
       <h2>AI brain</h2>
       <span class="badge" id="brain-badge">READY</span>
     </div>
-    <p id="brain-status">Studies settled demo trades and compares bounded strategy profiles.</p>
+    <p id="brain-status">Studies settled trades and compares bounded strategy profiles.</p>
     <div id="brain-ranked" class="muted small">Waiting for the bot to scan.</div>
     <p class="muted small footnote">Baseline uses your configured thresholds. Selective raises the score threshold by 8 and narrows the RSI band. Wide momentum lowers the threshold by 5 and widens the RSI band. For each signaled market, the learner also compares 1, 2, 3 and 5 minute expiries on chronological train/validation candles; it keeps your configured duration until results have enough trades and positive returns. It cannot change stake or risk limits. Past results do not predict future results.</p>
   </section>

@@ -49,7 +49,7 @@ if not exist ".env" (
     if exist ".env.example" (
         copy /y ".env.example" ".env" >nul
         echo Created .env from .env.example.
-        echo   -^> Add DERIV_APP_ID and a DEMO-scope DERIV_API_TOKEN to trade.
+        echo   -^> Add DERIV_APP_ID and DERIV_API_TOKEN to trade (ACCOUNT_MODE defaults to demo).
         echo   -^> Without them the panel still loads; Start will explain what is missing.
         echo.
     )

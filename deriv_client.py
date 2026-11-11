@@ -15,10 +15,8 @@ October 2026 — see README "API divergences" for what changed):
 
 Design decisions
 ----------------
-* **Demo-only.** ``connect()`` positively confirms ``account_type == "demo"``
-  from the REST account list before it will open a trading socket. If the
-  account cannot be identified as demo, it raises ``DemoAccountRequired`` and
-  no purchase is ever attempted. There is no flag to bypass this.
+* **Explicit account mode.** ``connect()`` selects only the configured account
+  type and validates the matching OTP endpoint. Demo is the default.
 * **Idempotent buy.** A timeout on ``buy`` is ambiguous: the contract may or
   may not exist. ``buy_contract`` therefore reconciles against the portfolio
   before it will ever retry, and never sends a second buy for the same
@@ -62,7 +60,7 @@ class AuthError(DerivError):
 
 
 class DemoAccountRequired(DerivError):
-    """The authorised account is not positively identified as a demo account."""
+    """The selected account mode is unavailable or does not match the OTP URL."""
 
 
 class ApiError(DerivError):
@@ -204,49 +202,40 @@ class DerivClient:
         """
         Authenticate and open the trading socket.
 
-        Refuses to proceed unless the account is positively identified as a
-        demo (virtual) account.
+        Refuses to proceed unless the configured account type is positively
+        identified and the OTP URL matches that account type.
         """
         accounts = self.list_accounts()
         if not accounts:
-            raise AuthError(
-                "No Options accounts found for this token. Create a demo "
-                "account in the Deriv dashboard first."
-            )
+            raise AuthError("No Options accounts found for this token.")
 
-        # Prefer an active demo account; never silently fall back to real.
-        demo = [a for a in accounts
-                if str(a.get("account_type", "")).lower() == "demo"]
-        if not demo:
+        expected_mode = self.cfg.account_mode
+        matching = [a for a in accounts
+                    if str(a.get("account_type", "")).lower() == expected_mode]
+        if not matching:
             types = sorted({str(a.get("account_type")) for a in accounts})
+            marker = "DEMO-ONLY MODE: " if expected_mode == "demo" else "LIVE MODE: "
             raise DemoAccountRequired(
-                "DEMO-ONLY: no demo account found for this token "
-                f"(account types present: {types}). The bot will not trade a "
-                "real-money account. Create a demo account and use a token "
-                "for it."
+                f"{marker}no {expected_mode} account found for this token "
+                f"(account types present: {types})."
             )
 
-        active_demo = [a for a in demo if a.get("status") == "active"] or demo
-        acct = active_demo[0]
+        active_matching = [a for a in matching if a.get("status") == "active"]
+        acct = (active_matching or matching)[0]
         self.account_id = str(acct.get("account_id"))
         self.account_type = str(acct.get("account_type", "")).lower()
         self.currency = acct.get("currency")
         self.balance = acct.get("balance")
 
         # Belt and braces: re-assert the invariant after assignment.
-        if self.account_type != "demo":
+        if self.account_type != expected_mode:
             raise DemoAccountRequired(
-                f"DEMO-ONLY: resolved account {self.account_id} is "
+                f"ACCOUNT-MODE: resolved account {self.account_id} is "
                 f"{self.account_type!r}, refusing to connect."
             )
 
         url = self.request_otp_url(self.account_id)
-        # The OTP URL determines demo vs real. Verify it points at /demo.
-        if "/ws/demo" not in url:
-            raise DemoAccountRequired(
-                "DEMO-ONLY: the OTP URL does not point at the demo endpoint "
-                f"({redact_url(url)}). Refusing to connect."
-            )
+        self._validate_otp_url(url, expected_mode)
 
         self._ws_url = url
         self._open_socket(url)
@@ -261,6 +250,22 @@ class DerivClient:
             "currency": self.currency,
             "balance": self.balance,
         }
+
+    @staticmethod
+    def _validate_otp_url(url: str, expected_mode: str) -> None:
+        from urllib.parse import parse_qs, urlparse
+
+        parsed = urlparse(url)
+        expected_path = f"/trading/v1/options/ws/{expected_mode}"
+        if (parsed.scheme != "wss" or parsed.hostname != "api.derivws.com"
+                or parsed.path != expected_path
+                or not parse_qs(parsed.query).get("otp")):
+            raise DemoAccountRequired(
+                f"{'DEMO-ONLY' if expected_mode == 'demo' else 'LIVE MODE'} "
+                f"account-mode protection: OTP URL does not point at the "
+                f"expected {expected_mode} endpoint ({redact_url(url)}). "
+                "Refusing to connect."
+            )
 
     def _open_socket(self, url: str) -> None:
         with self._lock:
@@ -337,6 +342,7 @@ class DerivClient:
                 # A fresh OTP is required — the old one is single-use.
                 if self.account_id:
                     url = self.request_otp_url(self.account_id)
+                    self._validate_otp_url(url, self.cfg.account_mode)
                     self._ws_url = url
                 self._open_socket(self._ws_url or DERIV_WS_PUBLIC)
                 self._reconnect_attempts = 0

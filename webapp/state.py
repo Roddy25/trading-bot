@@ -224,7 +224,8 @@ class BotState:
                 "status": self.status,
                 "status_detail": self.status_detail,
                 "error": self.error,
-                "demo_only": True,
+                "account_mode": (self.account.get("account_type")
+                                 if self.account else None),
                 "account": dict(self.account) if self.account else None,
                 "risk": dict(self.risk),
                 "brain": dict(self.brain),

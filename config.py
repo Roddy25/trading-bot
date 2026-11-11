@@ -2,8 +2,8 @@
 config.py — central configuration for the Deriv Volatility Bot.
 
 All values come from environment variables (loaded from `.env` if present).
-Nothing here is hard-coded to a credential, and there is deliberately no
-switch that can enable real-money trading: the bot is demo-only by design.
+Nothing here is hard-coded to a credential. Demo is the default; live access
+requires the explicit ACCOUNT_MODE=real setting.
 
 Design notes
 ------------
@@ -17,6 +17,7 @@ Design notes
 from __future__ import annotations
 
 import os
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
@@ -125,6 +126,8 @@ def _env_float(name: str, default: float, minimum: Optional[float] = None,
         val = float(raw)
     except ValueError:
         raise ConfigError(f"{name} must be a number, got {raw!r}")
+    if not math.isfinite(val):
+        raise ConfigError(f"{name} must be a finite number, got {raw!r}")
     if minimum is not None and val < minimum:
         raise ConfigError(f"{name} must be >= {minimum}, got {val}")
     if maximum is not None and val > maximum:
@@ -151,7 +154,8 @@ class Config:
     # --- credentials -------------------------------------------------------
     app_id: str
     api_token: str
-    require_demo_account: bool = True
+    account_mode: str = "demo"
+    deriv_strategy_mode: str = "trend"
 
     # --- contract ----------------------------------------------------------
     contract_type: str = "CALL"
@@ -190,6 +194,8 @@ class Config:
     sr_lookback: int = 50
     sr_proximity_atr: float = 0.5
     min_signal_score: int = 60
+    # Set internally by AIBrain; not an environment or user setting.
+    adaptive_profile: str = "baseline"
     require_htf_confirmation: bool = True
     require_candle_confirmation: bool = True
     scan_interval_seconds: int = 15
@@ -206,12 +212,16 @@ class Config:
     log_level: str = "INFO"
     log_file: str = "data/bot.log"
 
+    def __post_init__(self) -> None:
+        if self.account_mode not in ("demo", "real"):
+            raise ConfigError("account_mode must be either 'demo' or 'real'")
+
     # ------------------------------------------------------------------
     def __repr__(self) -> str:  # never leak the token
         return (
             f"Config(app_id={self.app_id!r}, api_token='***', "
             f"stake={self.stake}, currency={self.currency}, "
-            "market_scan='all active synthetic indices', demo_only=True)"
+            f"market_scan='all active synthetic indices', account_mode={self.account_mode!r})"
         )
 
     def to_safe_dict(self) -> dict:
@@ -220,6 +230,8 @@ class Config:
             "app_id": self.app_id,
             "api_token": "***redacted***",
             "contract_type": self.contract_type,
+            "account_mode": self.account_mode,
+            "deriv_strategy_mode": self.deriv_strategy_mode,
             "duration": f"{self.duration}{self.duration_unit}",
             "stake": self.stake,
             "currency": self.currency,
@@ -306,7 +318,7 @@ def load_config(env_file: Optional[str] = None, require_credentials: bool = True
             )
         if not token:
             raise ConfigError(
-                "DERIV_API_TOKEN is not set. Create a PAT for a DEMO account "
+                "DERIV_API_TOKEN is not set. Create a PAT for the selected account "
                 "in the Deriv dashboard and put it in .env (never in source)."
             )
 
@@ -314,6 +326,13 @@ def load_config(env_file: Optional[str] = None, require_credentials: bool = True
     if contract_type not in ("CALL", "PUT"):
         raise ConfigError(
             f"CONTRACT_TYPE must be CALL or PUT, got {contract_type!r}"
+        )
+
+    strategy_mode = (_env("DERIV_STRATEGY_MODE", "trend") or "trend").lower()
+    if strategy_mode not in ("trend", "grid", "dca"):
+        raise ConfigError(
+            "DERIV_STRATEGY_MODE must be trend, grid or dca, "
+            f"got {strategy_mode!r}"
         )
 
     duration_unit = (_env("DURATION_UNIT", "m") or "m").lower()
@@ -352,14 +371,15 @@ def load_config(env_file: Optional[str] = None, require_credentials: bool = True
     cfg = Config(
         app_id=app_id,
         api_token=token,
-        require_demo_account=_env_bool("REQUIRE_DEMO_ACCOUNT", True),
+        account_mode=(_env("ACCOUNT_MODE", "demo") or "demo").lower(),
+        deriv_strategy_mode=strategy_mode,
         contract_type=contract_type,
         duration=_env_int("DURATION", 1, 1, 1440),
         duration_unit=duration_unit,
         stake=stake,
         currency=(_env("CURRENCY", "USD") or "USD").upper(),
         max_open_contracts=_env_int("MAX_OPEN_CONTRACTS", 3, 1, 5),
-        max_consecutive_losses=_env_int("MAX_CONSECUTIVE_LOSSES", 3, 1, 50),
+        max_consecutive_losses=_env_int("MAX_CONSECUTIVE_LOSSES", 3, 0, 50),
         daily_loss_limit=_env_float("DAILY_LOSS_LIMIT", 5.0, 0.01, 100000),
         daily_profit_target=_env_float("DAILY_PROFIT_TARGET", 0.0, 0, 100000),
         martingale_enabled=_env_bool("MARTINGALE_ENABLED", False),
@@ -396,6 +416,9 @@ def load_config(env_file: Optional[str] = None, require_credentials: bool = True
         log_level=(_env("LOG_LEVEL", "INFO") or "INFO").upper(),
         log_file=_env("LOG_FILE", "data/bot.log") or "",
     )
+
+    if cfg.account_mode not in ("demo", "real"):
+        raise ConfigError("ACCOUNT_MODE must be either 'demo' or 'real'")
 
     # A stake of 0 or negative would be silently rejected by the broker; catch
     # it here so the failure is loud and early.
